@@ -1,0 +1,1547 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>من PDF إلى شرح وأسئلة أكاديمية</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&family=IBM+Plex+Mono:wght@400;500&display=swap');
+  :root{
+    --ink:#1c1a17; --paper:#f6f2ea; --paper-2:#ece5d6; --line:#d8cfba;
+    --accent:#2b5f56; --accent-2:#c1502e; --warn:#a3781f; --white:#fffdf9;
+  }
+  *{box-sizing:border-box;}
+  body{ margin:0; font-family:'Cairo',sans-serif; background:var(--paper); color:var(--ink);
+    min-height:100vh; display:flex; align-items:flex-start; justify-content:center; padding:32px 16px; }
+  .sheet{ width:100%; max-width:700px; background:var(--white); border:1px solid var(--line);
+    box-shadow:0 1px 0 var(--line), 0 12px 30px -18px rgba(28,26,23,.35); position:relative; overflow:hidden; }
+  .sheet::before{ content:""; position:absolute; top:0; right:0; left:0; height:6px;
+    background:repeating-linear-gradient(90deg,var(--accent-2) 0 14px, transparent 14px 26px); opacity:.85; }
+  header{ padding:34px 32px 20px; border-bottom:1px dashed var(--line); }
+  .eyebrow{ font-family:'IBM Plex Mono',monospace; font-size:12px; letter-spacing:.14em;
+    color:var(--accent); text-transform:uppercase; margin:0 0 10px; }
+  h1{ margin:0; font-size:26px; font-weight:900; line-height:1.25; }
+  p.sub{ margin:10px 0 0; color:#6b6255; font-size:15px; line-height:1.7; }
+  main{ padding:28px 32px 34px; }
+  .step-label{ display:flex; align-items:center; gap:10px; margin:0 0 14px; }
+  .step-num{ width:22px;height:22px; border-radius:50%; background:var(--accent); color:var(--white);
+    font-family:'IBM Plex Mono',monospace; font-size:12px; display:flex;align-items:center;justify-content:center; flex-shrink:0; }
+  .step-num.done{background:#4a7a6f;}
+  .step-title{font-weight:700;font-size:15px;}
+  .drop{ border:2px dashed var(--line); background:var(--paper); padding:34px 20px; text-align:center;
+    cursor:pointer; transition:border-color .2s, background .2s; position:relative; }
+  .drop:hover, .drop.drag{ border-color:var(--accent); background:#eef4f1; }
+  .drop input{ position:absolute; inset:0; opacity:0; cursor:pointer; }
+  .drop-icon{ width:44px;height:44px;margin:0 auto 12px; color:var(--accent); }
+  .drop-title{font-weight:700;font-size:16px;}
+  .drop-hint{ font-family:'IBM Plex Mono',monospace; font-size:12px; color:#8a8172; margin-top:6px; }
+  .file-row{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:18px;
+    padding:12px 14px; background:var(--paper-2); border:1px solid var(--line);
+    font-family:'IBM Plex Mono',monospace; font-size:13px; display:none; }
+  .file-row.show{display:flex;}
+  .file-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .file-clear{ border:none;background:none;color:var(--accent-2);cursor:pointer; font-family:inherit;font-size:13px;text-decoration:underline; flex-shrink:0; }
+  .stats-grid{ display:grid; grid-template-columns:repeat(5,1fr); gap:8px; margin-top:16px; }
+  .stat-box{ background:var(--paper); border:1px solid var(--line); text-align:center; padding:10px 4px; }
+  .stat-num{ font-family:'IBM Plex Mono',monospace; font-weight:700; font-size:18px; color:var(--accent); }
+  .stat-label{ font-size:11px; color:#8a8172; margin-top:2px; }
+  .tree-box{ margin-top:14px; max-height:220px; overflow-y:auto; padding:12px 14px; background:var(--paper);
+    border:1px solid var(--line); font-family:'IBM Plex Mono',monospace; font-size:11.5px; line-height:1.9; white-space:pre; direction:rtl; }
+  .warn-line{ margin-top:10px; font-size:12px; color:#8a6a1f; font-family:'IBM Plex Mono',monospace; line-height:1.7; }
+  .thumbs{ display:grid; grid-template-columns:repeat(auto-fill,minmax(50px,1fr)); gap:6px; margin-top:14px; }
+  .thumbs img{ width:100%; aspect-ratio:3/4; object-fit:cover; border:1px solid var(--line); background:var(--paper-2); }
+  .error-box{ margin-top:16px; padding:14px; background:#fbeae5; border:1px solid var(--accent-2); color:#8a3a20; font-size:14px; display:none; }
+  .error-box.show{display:block;}
+  .warn-box{ margin-top:16px; padding:14px; background:#fbf3e0; border:1px solid var(--warn); color:#7a5a12; font-size:14px; display:none; }
+  .warn-box.show{display:block;}
+  .divider{ margin:30px 0 20px; display:flex; align-items:center; gap:12px; }
+  .divider .line{flex:1;height:1px;background:var(--line);}
+  .divider .txt{ font-family:'IBM Plex Mono',monospace; font-size:11px; color:#a39a8a; white-space:nowrap; }
+  .section{ display:none; } .section.show{display:block;}
+  .keys-block{ margin-top:4px; }
+  .key-row{ display:flex; gap:8px; margin-bottom:8px; }
+  .key-row input{ flex:1; padding:10px 10px; border:1px solid var(--line); background:var(--white); font-family:'IBM Plex Mono',monospace; font-size:13px; }
+  .key-remove{ border:1px solid var(--line); background:var(--paper); cursor:pointer; padding:0 12px; color:var(--accent-2); font-size:14px; }
+  .key-add{ border:1px dashed var(--line); background:none; cursor:pointer; padding:8px 14px; font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--accent); width:100%; }
+  .key-add:hover{ border-color:var(--accent); background:#eef4f1; }
+  .hint-small{ font-family:'IBM Plex Mono',monospace; font-size:11px; color:#a39a8a; margin:8px 0 0; line-height:1.6; }
+  .hint-small a{color:var(--accent);}
+  .opt label{ display:block; font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:#8a8172; margin-bottom:6px; }
+  .opt select, .opt input{ width:100%; padding:10px 10px; border:1px solid var(--line); background:var(--white); font-family:'Cairo',sans-serif; font-size:14px; color:var(--ink); }
+  .opts{ display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:18px; }
+  .range-row{ display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:14px; }
+  .cost-note{ margin-top:16px; padding:12px 14px; background:var(--paper); border:1px solid var(--line); font-size:13px; color:#6b6255; line-height:1.7; }
+  .cost-note b{color:var(--ink);}
+  .btn-row{ display:flex; gap:10px; margin-top:22px; flex-wrap:wrap; }
+  .go{ flex:1; padding:15px; background:var(--accent); color:var(--white); border:none; font-family:'Cairo',sans-serif; font-weight:700; font-size:16px; cursor:pointer; transition:background .2s, transform .05s; }
+  .go:hover:not(:disabled){background:#204a43;}
+  .go:active:not(:disabled){transform:translateY(1px);}
+  .go:disabled{background:#c9c2b3;cursor:not-allowed;}
+  .go.secondary{background:var(--accent-2);}
+  .go.secondary:hover:not(:disabled){background:#a03f22;}
+  .go.ghost{ background:var(--white); color:var(--accent); border:1px solid var(--accent); flex:0 0 auto; padding:15px 20px; }
+  .go.ghost:hover:not(:disabled){background:#eef4f1;}
+  .status{ margin-top:18px; display:none; } .status.show{display:block;}
+  .status-line{ display:flex; justify-content:space-between; font-family:'IBM Plex Mono',monospace; font-size:12px; color:#6b6255; margin-bottom:6px; }
+  .bar-track{ height:8px; background:var(--paper-2); border:1px solid var(--line); overflow:hidden; }
+  .bar-fill{ height:100%; width:0%; background:var(--accent-2); transition:width .2s ease; }
+  .live-header{ display:flex; justify-content:space-between; align-items:center; margin-top:22px; margin-bottom:8px; }
+  .live-title{font-weight:700;font-size:14px;}
+  .live-count{ font-family:'IBM Plex Mono',monospace; font-size:12px; color:#6b6255; }
+  .text-live{ max-height:340px; overflow-y:auto; padding:16px; background:var(--paper); border:1px solid var(--line);
+    font-family:'IBM Plex Mono',monospace; font-size:12.5px; white-space:pre-wrap; line-height:1.8; }
+  .page-marker{ color:var(--accent); font-weight:700; }
+  .page-fail{ color:var(--accent-2); }
+  .live-list{ margin-top:14px; max-height:260px; overflow-y:auto; padding:12px 14px; background:var(--paper);
+    border:1px solid var(--line); font-family:'IBM Plex Mono',monospace; font-size:12px; line-height:1.9; }
+  .live-item{ display:flex; gap:8px; }
+  .live-item.ok{color:var(--accent);}
+  .live-item.fail{color:var(--accent-2);}
+  .live-item .t{color:var(--ink); font-family:'Cairo',sans-serif;}
+  .done-strip{ margin-top:16px; padding:14px; background:#eef4f1; border:1px solid var(--accent); display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  .done-strip .msg{font-weight:700; color:var(--accent); font-size:14px;}
+  footer{ padding:16px 32px 26px; font-family:'IBM Plex Mono',monospace; font-size:11px; color:#a39a8a; border-top:1px dashed var(--line); text-align:center; }
+</style>
+</head>
+<body>
+<div class="sheet">
+  <header>
+    <p class="eyebrow">أداة شاملة — من الملف الأصلي إلى محتوى جاهز</p>
+    <h1>من PDF إلى شرح وأسئلة أكاديمية</h1>
+    <p class="sub">ثلاث مراحل متتالية في أداة واحدة: تحويل PDF إلى نص عبر Gemini، ثم تحليل الهيكل الهرمي للكتاب تلقائياً، ثم توليد شرح وأسئلة أكاديمية مفيدة لكل جزء وتصدير Word جاهز — بدون الحاجة لرفع أي ملف وسيط بينهم يدوياً.</p>
+  </header>
+  <main>
+    <div class="step-label"><span class="step-num" id="stepNum1">1</span><span class="step-title">رفع ملف PDF — يبدأ التحويل لصور تلقائياً</span></div>
+
+    <div class="drop" id="dropZone">
+      <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M12 3v12m0-12 4 4m-4-4-4 4" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <div class="drop-title">اضغط لاختيار ملف PDF أو اسحبه هنا</div>
+      <div class="drop-hint">PDF فقط</div>
+      <input type="file" id="fileInput" accept="application/pdf">
+    </div>
+
+    <div class="file-row" id="fileRow">
+      <span class="file-name" id="fileName"></span>
+      <button class="file-clear" id="fileClear">إزالة</button>
+    </div>
+
+    <div class="opts">
+      <div class="opt">
+        <label for="scale">دقة التحويل</label>
+        <select id="scale">
+          <option value="1.5">عادية</option>
+          <option value="2" selected>عالية (موصى بها)</option>
+          <option value="3">فائقة (لخط صغير جداً)</option>
+        </select>
+      </div>
+      <div class="opt"></div>
+    </div>
+
+    <div class="status" id="statusBox">
+      <div class="status-line">
+        <span id="statusText">جارٍ التحويل…</span>
+        <span id="statusCount">0 / 0</span>
+      </div>
+      <div class="bar-track"><div class="bar-fill" id="barFill"></div></div>
+      <div class="thumbs" id="thumbs"></div>
+    </div>
+
+    <div class="error-box" id="errorBox"></div>
+
+    <div class="divider"><div class="line"></div><div class="txt">الخطوة التالية</div><div class="line"></div></div>
+
+    <div class="step-label"><span class="step-num" id="stepNum2">2</span><span class="step-title">استخراج النص صفحة بصفحة عبر Gemini</span></div>
+
+    <div class="section" id="extractSection">
+      <div class="keys-block" id="keysBlock">
+        <div class="opt">
+          <label>مفاتيح Gemini API (بالترتيب — تُستخدم لمرحلتي الاستخراج والتوليد معاً)</label>
+        </div>
+        <div id="keyRows"></div>
+        <button type="button" class="key-add" id="addKeyBtn">+ إضافة مفتاح احتياطي</button>
+        <div class="hint-small">
+          المفاتيح تُستخدم في هذه الجلسة فقط ولا تُحفظ ولا تُرسل لأي جهة غير Google.
+          احصل على مفتاح مجاني من <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>
+        </div>
+      </div>
+
+      <div class="opts">
+        <div class="opt">
+          <label for="model">النموذج (لكل المراحل)</label>
+          <select id="model">
+            <option value="gemini-3.5-flash-lite" selected>اقتصادي (أرخص وأسرع)</option>
+            <option value="gemini-3.6-flash">دقة أعلى</option>
+          </select>
+        </div>
+        <div class="opt">
+          <label for="skipFootnotes">الهوامش والمراجع أسفل الصفحة</label>
+          <select id="skipFootnotes">
+            <option value="yes" selected>تجاهلها (استخرج المتن فقط)</option>
+            <option value="no">استخرجها ضمن النص</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="range-row">
+        <div class="opt">
+          <label for="fromPage">من صفحة</label>
+          <input type="number" id="fromPage" min="1" value="1">
+        </div>
+        <div class="opt">
+          <label for="toPage">إلى صفحة</label>
+          <input type="number" id="toPage" min="1" value="1">
+        </div>
+      </div>
+
+      <div class="cost-note">
+        توفيراً لاستخدام الـ API: تُرسل نسخة مصغّرة من كل صورة، والصفحات تُعالج واحدة تلو الأخرى بفاصل زمني يراعي حد الطلبات بالدقيقة. الانتقال للمفتاح التالي يحدث فقط عند نفاد الحد اليومي الحقيقي، أما تخطي حد الدقيقة (مؤقت) فتتعامل معه الأداة بالانتظار وإعادة المحاولة تلقائياً.
+      </div>
+
+      <div class="progress-io">
+        <div class="opt"><label>حفظ تقدم الاستخراج / استكمال بعد إغلاق المتصفح</label></div>
+        <div class="btn-row" style="margin-top:0;">
+          <button class="go ghost" id="exportProgressBtn" type="button">⬇ تنزيل نسخة من التقدم</button>
+          <button class="go ghost" id="importProgressLabel" type="button">⬆ استيراد تقدم محفوظ</button>
+          <input type="file" id="importProgressInput" accept="application/json" style="display:none;">
+        </div>
+        <div class="hint-small">ارفع نفس ملف PDF أولاً، ثم استورد ملف التقدم (json) لتُستكمل الصفحات المُنجزة تلقائياً.</div>
+        <div class="warn-box" id="importWarnBox"></div>
+      </div>
+
+      <div class="btn-row">
+        <button class="go secondary" id="extractBtn">ابدأ استخراج النص</button>
+        <button class="go ghost" id="pauseBtn" style="display:none;">إيقاف مؤقت</button>
+      </div>
+
+      <div class="warn-box" id="exhaustedBox">
+        انتهت حدود كل المفاتيح المتاحة عند الصفحة <span id="exhaustedPage"></span>.
+        أضف مفتاحاً جديداً في الأعلى ثم اضغط "استئناف".
+        <div class="btn-row"><button class="go secondary" id="resumeBtn">استئناف</button></div>
+      </div>
+
+      <div class="live-header" id="liveHeader" style="display:none;">
+        <span class="live-title">النص المستخرج (يُضاف تلقائياً أثناء المعالجة)</span>
+        <span class="live-count" id="liveCount">0 / 0 صفحة</span>
+      </div>
+      <div class="bar-track" id="exBarTrack" style="display:none;"><div class="bar-fill" id="exBarFill"></div></div>
+      <div class="text-live" id="textLive" style="display:none;"></div>
+
+      <div class="done-strip" id="doneStrip" style="display:none;">
+        <span class="msg" id="doneMsg">اكتمل الاستخراج</span>
+        <button class="go ghost" id="dlTxtBtn" style="flex:0 0 auto;">تحميل النص TXT فقط</button>
+        <button class="go" id="continueToGenBtn" style="flex:0 0 auto;">المتابعة لتوليد الشرح والأسئلة ←</button>
+      </div>
+    </div>
+
+    <div id="step3Anchor"></div>
+    <div class="divider" id="genDivider" style="display:none;"><div class="line"></div><div class="txt">الخطوة التالية</div><div class="line"></div></div>
+    <div class="step-label" id="stepLabel3" style="display:none;"><span class="step-num" id="stepNum3">3</span><span class="step-title">تحليل الهيكل وتوليد الشرح والأسئلة الأكاديمية</span></div>
+
+    <div class="stats-grid" id="statsGrid" style="display:none;">
+      <div class="stat-box"><div class="stat-num" id="statSection">0</div><div class="stat-label">أقسام</div></div>
+      <div class="stat-box"><div class="stat-num" id="statPart">0</div><div class="stat-label">أبواب</div></div>
+      <div class="stat-box"><div class="stat-num" id="statChapter">0</div><div class="stat-label">فصول</div></div>
+      <div class="stat-box"><div class="stat-num" id="statTopic">0</div><div class="stat-label">مباحث</div></div>
+      <div class="stat-box"><div class="stat-num" id="statLeaf">0</div><div class="stat-label">أجزاء ستُشرح</div></div>
+    </div>
+    <div class="tree-box" id="treeBox" style="display:none;"></div>
+    <div class="warn-line" id="warnLine" style="display:none;">
+      تنبيه: التعرف على الهيكل يتم تلقائياً بالاعتماد على أنماط النص، راجع القائمة أعلاه للتأكد أنها صحيحة قبل المتابعة.
+    </div>
+
+    <div class="section" id="genSection">
+      <div class="opts">
+        <div class="opt">
+          <label for="wordCount">طول الشرح لكل جزء</label>
+          <select id="wordCount">
+            <option value="short">قصير (~150 كلمة)</option>
+            <option value="medium" selected>متوسط (~300 كلمة)</option>
+            <option value="long">مفصّل (~450 كلمة)</option>
+          </select>
+        </div>
+        <div class="opt">
+          <label for="mcqCount">عدد أسئلة الاختيار من متعدد</label>
+          <select id="mcqCount">
+            <option value="3">3 أسئلة</option>
+            <option value="5" selected>5 أسئلة</option>
+            <option value="7">7 أسئلة</option>
+          </select>
+        </div>
+        <div class="opt">
+          <label for="essayCount">عدد الأسئلة المقالية</label>
+          <select id="essayCount">
+            <option value="2">سؤالان</option>
+            <option value="3" selected>3 أسئلة</option>
+            <option value="4">4 أسئلة</option>
+          </select>
+        </div>
+        <div class="opt"></div>
+      </div>
+
+      <div class="cost-note">
+        كل جزء (مطلب أو أصغر وحدة متاحة) يُرسل كطلب واحد لـ Gemini بنفس مفاتيح ونموذج مرحلة الاستخراج أعلاه، وتُعالج الأجزاء واحداً تلو الآخر بفاصل زمني يراعي حد الطلبات بالدقيقة.
+      </div>
+
+      <div class="progress-io">
+        <div class="opt"><label>حفظ تقدم التوليد / استكمال لاحقاً</label></div>
+        <div class="btn-row" style="margin-top:0;">
+          <button class="go ghost" id="genExportProgressBtn" type="button">⬇ تنزيل نسخة من التقدم</button>
+          <button class="go ghost" id="genImportProgressLabel" type="button">⬆ استيراد تقدم محفوظ</button>
+          <input type="file" id="genImportProgressInput" accept="application/json" style="display:none;">
+        </div>
+        <div class="hint-small">أعد استخراج نفس نص الكتاب أولاً (خطوة ١+٢) حتى يُحلَّل هيكله، ثم استورد ملف تقدم التوليد لتكمل من حيث توقفت.</div>
+        <div class="warn-box" id="genImportWarnBox"></div>
+      </div>
+
+      <div class="btn-row">
+        <button class="go secondary" id="genBtn">ابدأ توليد الشرح والأسئلة</button>
+        <button class="go ghost" id="genPauseBtn" style="display:none;">إيقاف مؤقت</button>
+      </div>
+
+      <div class="warn-box" id="genExhaustedBox">
+        انتهت حدود كل المفاتيح المتاحة عند الجزء رقم <span id="genExhaustedIdx"></span>.
+        أضف مفتاحاً جديداً في مربع المفاتيح أعلاه ثم اضغط "استئناف".
+        <div class="btn-row"><button class="go secondary" id="genResumeBtn">استئناف</button></div>
+      </div>
+
+      <div class="status" id="genStatusBox">
+        <div class="status-line"><span id="genStatusText">جارٍ المعالجة…</span><span id="genStatusCount">0 / 0</span></div>
+        <div class="bar-track"><div class="bar-fill" id="genBarFill"></div></div>
+      </div>
+      <div class="live-list" id="liveList" style="display:none;"></div>
+
+      <div class="done-strip" id="genDoneStrip" style="display:none;">
+        <span class="msg" id="genDoneMsg">اكتمل التوليد</span>
+        <button class="go" id="dlDocxBtn" style="flex:0 0 auto;">تحميل ملف Word</button>
+      </div>
+    </div>
+  </main>
+  <footer>كل التحويل والتحليل يتم داخل المتصفح — الطلبات ترسل الصور/النص إلى Gemini API مباشرة من جهازك فقط</footer>
+</div>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+/* ================= منع قفل الشاشة أثناء العمل + تحذير قبل إغلاق التاب بالخطأ ================= */
+let wakeLock = null;
+async function requestWakeLock(){
+  try{
+    if('wakeLock' in navigator){
+      wakeLock = await navigator.wakeLock.request('screen');
+    }
+  }catch(err){ /* بعض الأجهزة/المتصفحات مش بتدعمها — تجاهل بهدوء */ }
+}
+function releaseWakeLockIfIdle(){
+  if(!extractionRunning && !genRunning && wakeLock){
+    wakeLock.release().catch(()=>{});
+    wakeLock = null;
+  }
+}
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'visible' && (extractionRunning || genRunning)){
+    requestWakeLock();
+  }
+});
+window.addEventListener('beforeunload', (e) => {
+  if(extractionRunning || genRunning){
+    e.preventDefault();
+    e.returnValue = 'في عملية جارية الآن — إغلاق الصفحة سيوقفها. احفظ تقدمك أولاً إن أردت.';
+    return e.returnValue;
+  }
+});
+
+/* ================= عناصر مشتركة عامة ================= */
+const errorBox = document.getElementById('errorBox');
+function showError(msg){ errorBox.textContent = msg; errorBox.classList.add('show'); }
+
+/* ================= المرحلة ١+٢: PDF → صور → نص (مطابقة لأداة pdf-to-text الأصلية) ================= */
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+const fileRow = document.getElementById('fileRow');
+const fileName = document.getElementById('fileName');
+const fileClear = document.getElementById('fileClear');
+const statusBox = document.getElementById('statusBox');
+const statusText = document.getElementById('statusText');
+const statusCount = document.getElementById('statusCount');
+const barFill = document.getElementById('barFill');
+const thumbs = document.getElementById('thumbs');
+const stepNum1 = document.getElementById('stepNum1');
+const stepNum2 = document.getElementById('stepNum2');
+
+const extractSection = document.getElementById('extractSection');
+const keyRows = document.getElementById('keyRows');
+const addKeyBtn = document.getElementById('addKeyBtn');
+const modelSelect = document.getElementById('model');
+const fromPageInput = document.getElementById('fromPage');
+const toPageInput = document.getElementById('toPage');
+const extractBtn = document.getElementById('extractBtn');
+const pauseBtn = document.getElementById('pauseBtn');
+const exhaustedBox = document.getElementById('exhaustedBox');
+const exhaustedPage = document.getElementById('exhaustedPage');
+const resumeBtn = document.getElementById('resumeBtn');
+const liveHeader = document.getElementById('liveHeader');
+const liveCount = document.getElementById('liveCount');
+const exBarTrack = document.getElementById('exBarTrack');
+const exBarFill = document.getElementById('exBarFill');
+const textLive = document.getElementById('textLive');
+const doneStrip = document.getElementById('doneStrip');
+const doneMsg = document.getElementById('doneMsg');
+const dlTxtBtn = document.getElementById('dlTxtBtn');
+const continueToGenBtn = document.getElementById('continueToGenBtn');
+const exportProgressBtn = document.getElementById('exportProgressBtn');
+const importProgressLabel = document.getElementById('importProgressLabel');
+const importProgressInput = document.getElementById('importProgressInput');
+const importWarnBox = document.getElementById('importWarnBox');
+
+let currentFile = null;
+let pageStore = [];
+let totalPages = 0;
+let extractionResults = {};
+let lastCompletedPage = 0;
+let extractionRunning = false;
+let extractionPaused = false;
+let stopAfterCurrent = false;
+let currentKeyIdx = 0;
+let txtBlobUrl = null;
+let rangeStart = 1, rangeEnd = 1;
+
+function makeKeyRow(placeholderNum){
+  const row = document.createElement('div');
+  row.className = 'key-row';
+  const input = document.createElement('input');
+  input.type = 'password';
+  input.placeholder = `مفتاح API #${placeholderNum}`;
+  input.className = 'api-key-input';
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'key-remove';
+  toggle.textContent = '👁';
+  toggle.title = 'إظهار / إخفاء';
+  toggle.onclick = () => { input.type = input.type === 'password' ? 'text' : 'password'; };
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'key-remove';
+  remove.textContent = '✕';
+  remove.title = 'إزالة';
+  remove.onclick = () => { if(keyRows.children.length > 1) row.remove(); };
+  row.appendChild(input);
+  row.appendChild(toggle);
+  row.appendChild(remove);
+  return row;
+}
+keyRows.appendChild(makeKeyRow(1));
+keyRows.appendChild(makeKeyRow(2));
+addKeyBtn.addEventListener('click', () => {
+  keyRows.appendChild(makeKeyRow(keyRows.children.length + 1));
+});
+
+function collectKeys(){
+  return Array.from(keyRows.querySelectorAll('.api-key-input'))
+    .map(i => i.value.trim())
+    .filter(v => v.length > 0);
+}
+
+function resetAll(){
+  statusBox.classList.remove('show');
+  errorBox.classList.remove('show');
+  thumbs.innerHTML = '';
+  barFill.style.width = '0%';
+  extractSection.classList.remove('show');
+  stepNum1.classList.remove('done');
+  stepNum2.classList.remove('done');
+  pageStore = [];
+  totalPages = 0;
+  resetExtraction();
+  hideGenStage();
+}
+
+function resetExtraction(){
+  extractionResults = {};
+  lastCompletedPage = 0;
+  extractionRunning = false;
+  extractionPaused = false;
+  stopAfterCurrent = false;
+  currentKeyIdx = 0;
+  if(txtBlobUrl){ URL.revokeObjectURL(txtBlobUrl); txtBlobUrl = null; }
+  exhaustedBox.classList.remove('show');
+  liveHeader.style.display = 'none';
+  exBarTrack.style.display = 'none';
+  textLive.style.display = 'none';
+  textLive.innerHTML = '';
+  doneStrip.style.display = 'none';
+  pauseBtn.style.display = 'none';
+  extractBtn.style.display = 'inline-block';
+  extractBtn.textContent = 'ابدأ استخراج النص';
+  extractBtn.disabled = false;
+}
+
+function setFile(file){
+  if(!file) return;
+  if(file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')){
+    showError('الرجاء اختيار ملف PDF صالح.');
+    return;
+  }
+  currentFile = file;
+  fileName.textContent = file.name;
+  fileRow.classList.add('show');
+  resetAll();
+  convertToImages();
+}
+
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag');
+  if(e.dataTransfer.files.length) setFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', e => {
+  if(e.target.files.length) setFile(e.target.files[0]);
+});
+fileClear.addEventListener('click', () => {
+  currentFile = null;
+  fileInput.value = '';
+  fileRow.classList.remove('show');
+  resetAll();
+});
+document.getElementById('scale').addEventListener('change', () => {
+  if(currentFile) convertToImages();
+});
+
+function canvasToResizedBase64(canvas, maxDim){
+  let { width, height } = canvas;
+  let w = width, h = height;
+  if(Math.max(w, h) > maxDim){
+    const ratio = maxDim / Math.max(w, h);
+    w = Math.round(w * ratio);
+    h = Math.round(h * ratio);
+  }
+  const small = document.createElement('canvas');
+  small.width = w; small.height = h;
+  small.getContext('2d').drawImage(canvas, 0, 0, w, h);
+  const dataUrl = small.toDataURL('image/jpeg', 0.85);
+  return dataUrl.split(',')[1];
+}
+
+async function convertToImages(){
+  resetExtraction();
+  extractSection.classList.remove('show');
+  statusBox.classList.add('show');
+  errorBox.classList.remove('show');
+  thumbs.innerHTML = '';
+  barFill.style.width = '0%';
+
+  const scale = parseFloat(document.getElementById('scale').value);
+
+  try{
+    statusText.textContent = 'جارٍ فتح الملف…';
+    const arrayBuffer = await currentFile.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const total = pdf.numPages;
+    totalPages = total;
+    statusCount.textContent = `0 / ${total}`;
+    statusText.textContent = 'جارٍ تحويل الصفحات إلى صور…';
+
+    pageStore = new Array(total + 1);
+
+    for(let i = 1; i <= total; i++){
+      const page = await pdf.getPage(i);
+      const viewport = page.getViewport({ scale });
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      const ctx = canvas.getContext('2d');
+      await page.render({ canvasContext: ctx, viewport }).promise;
+
+      pageStore[i] = canvasToResizedBase64(canvas, 1400);
+
+      if(thumbs.children.length < 30){
+        const img = document.createElement('img');
+        img.src = canvas.toDataURL('image/jpeg', 0.55);
+        thumbs.appendChild(img);
+      }
+
+      statusCount.textContent = `${i} / ${total}`;
+      barFill.style.width = `${Math.round((i/total)*100)}%`;
+      canvas.width = 0; canvas.height = 0;
+    }
+
+    statusText.textContent = `اكتمل تحويل ${total} صفحة إلى صور`;
+    stepNum1.classList.add('done');
+
+    fromPageInput.value = 1;
+    fromPageInput.max = total;
+    toPageInput.value = total;
+    toPageInput.max = total;
+    extractSection.classList.add('show');
+  }catch(err){
+    console.error(err);
+    showError('حدث خطأ أثناء تحويل الملف. تأكد أن الملف PDF غير تالف وحاول مجدداً.');
+  }
+}
+
+function isKeyExhaustedError(status, message){
+  const m = (message || '').toLowerCase();
+  if(status === 401 || status === 403) return true;
+  if(m.includes('api key not valid') || m.includes('permission')) return true;
+  if(status === 429 && (m.includes('per day') || m.includes('perday') || m.includes('daily') || m.includes('requests per day'))) return true;
+  return false;
+}
+
+async function callGemini(base64Jpeg, apiKey, model, skipFootnotes){
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const basePrompt = 'استخرج كل النص الموجود في هذه الصورة بدقة تامة كما هو مكتوب، بنفس اللغة. حافظ على فواصل الفقرات والأسطر قدر الإمكان. لا تضف أي شرح أو تعليق أو مقدمة، أعد النص المستخرج فقط. إذا لم يوجد نص، أعد سطراً فارغاً.';
+  const footnotesInstruction = ' تنبيه مهم: قد تحتوي الصفحة على قسم هوامش أو مراجع أسفلها (عادة مفصول عن المتن بخط أفقي، ويبدأ غالباً بأرقام مرجعية مثل (1) أو (2) ويذكر أسماء مؤلفين وكتب ودور نشر وأرقام صفحات). تجاهل هذا القسم تماماً ولا تُدرجه في النص المستخرج، واستخرج فقط نص المتن الأساسي أعلى الخط الفاصل.';
+  const promptText = skipFootnotes ? (basePrompt + footnotesInstruction) : basePrompt;
+  const body = {
+    contents: [{
+      parts: [
+        { text: promptText },
+        { inline_data: { mime_type: 'image/jpeg', data: base64Jpeg } }
+      ]
+    }],
+    generationConfig: { temperature: 0 }
+  };
+  let res;
+  try{
+    res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+  }catch(networkErr){
+    const e = new Error('تعذّر الاتصال بالشبكة');
+    e.status = 0;
+    throw e;
+  }
+  if(!res.ok){
+    let msg = `HTTP ${res.status}`;
+    try{ const errJson = await res.json(); if(errJson.error && errJson.error.message) msg = errJson.error.message; }catch(e){}
+    const e = new Error(msg);
+    e.status = res.status;
+    throw e;
+  }
+  const data = await res.json();
+  const text = data?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
+  return text.trim();
+}
+
+function appendLive(pageNum, text, failed){
+  const div = document.createElement('div');
+  if(failed){
+    div.innerHTML = `<span class="page-marker">--- الصفحة ${pageNum} ---</span>\n<span class="page-fail">${text}</span>\n`;
+  }else{
+    div.innerHTML = `<span class="page-marker">--- الصفحة ${pageNum} ---</span>\n${text.replace(/</g,'&lt;')}\n`;
+  }
+  textLive.appendChild(div);
+  textLive.scrollTop = textLive.scrollHeight;
+}
+
+function buildFullText(){
+  const parts = [];
+  for(let p = rangeStart; p <= rangeEnd; p++){
+    if(extractionResults[p] !== undefined){
+      const r = extractionResults[p];
+      parts.push(`--- الصفحة ${p} ---\n${r.fail ? '[تعذّر الاستخراج: ' + r.note + ']' : r.text}`);
+    }
+  }
+  return parts.join('\n\n');
+}
+
+function refreshDownload(){
+  const fullText = buildFullText();
+  if(txtBlobUrl){ URL.revokeObjectURL(txtBlobUrl); }
+  const blob = new Blob([fullText], { type: 'text/plain;charset=utf-8' });
+  txtBlobUrl = URL.createObjectURL(blob);
+  const baseName = (currentFile && currentFile.name ? currentFile.name : 'document').replace(/\.pdf$/i, '');
+  dlTxtBtn.onclick = () => {
+    const a = document.createElement('a');
+    a.href = txtBlobUrl;
+    a.download = `${baseName}-text.txt`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+}
+
+async function runExtraction(startPage){
+  const keys = collectKeys();
+  if(keys.length === 0){
+    showError('الرجاء إدخال مفتاح Gemini API واحد على الأقل.');
+    return;
+  }
+  errorBox.classList.remove('show');
+  exhaustedBox.classList.remove('show');
+
+  rangeStart = Math.max(1, Math.min(parseInt(fromPageInput.value,10) || 1, totalPages));
+  rangeEnd = Math.max(rangeStart, Math.min(parseInt(toPageInput.value,10) || totalPages, totalPages));
+  const model = modelSelect.value;
+  const skipFootnotes = document.getElementById('skipFootnotes').value === 'yes';
+
+  const from = Math.max(startPage, rangeStart);
+
+  liveHeader.style.display = 'flex';
+  exBarTrack.style.display = 'block';
+  textLive.style.display = 'block';
+  doneStrip.style.display = 'none';
+  extractBtn.style.display = 'none';
+  pauseBtn.style.display = 'inline-block';
+  pauseBtn.textContent = 'إيقاف مؤقت';
+  extractionRunning = true;
+  extractionPaused = false;
+  stopAfterCurrent = false;
+  requestWakeLock();
+
+  const totalInRange = rangeEnd - rangeStart + 1;
+
+  for(let page = from; page <= rangeEnd; page++){
+    if(stopAfterCurrent){
+      extractionRunning = false;
+      extractionPaused = true;
+      pauseBtn.textContent = 'استكمال';
+      releaseWakeLockIfIdle();
+      return;
+    }
+
+    let succeeded = false;
+    let attemptsOnThisKey = 0;
+    let rateLimitBackoffs = 0;
+
+    while(!succeeded){
+      if(currentKeyIdx >= keys.length){
+        exhaustedPage.textContent = page;
+        exhaustedBox.classList.add('show');
+        extractionRunning = false;
+        pauseBtn.style.display = 'none';
+        refreshDownload();
+        doneStrip.style.display = 'flex';
+        doneMsg.textContent = `توقّف عند الصفحة ${page} — نفدت حدود كل المفاتيح`;
+        releaseWakeLockIfIdle();
+        return;
+      }
+      try{
+        const text = await callGemini(pageStore[page], keys[currentKeyIdx], model, skipFootnotes);
+        extractionResults[page] = { fail:false, text };
+        appendLive(page, text, false);
+        succeeded = true;
+      }catch(err){
+        console.error('page', page, 'key', currentKeyIdx, err);
+        if(isKeyExhaustedError(err.status, err.message)){
+          currentKeyIdx++;
+          attemptsOnThisKey = 0;
+          rateLimitBackoffs = 0;
+          continue;
+        }else if(err.status === 429){
+          rateLimitBackoffs++;
+          if(rateLimitBackoffs > 6){
+            currentKeyIdx++;
+            attemptsOnThisKey = 0;
+            rateLimitBackoffs = 0;
+            continue;
+          }
+          const waitMs = Math.min(4000 * rateLimitBackoffs, 30000);
+          liveCount.textContent = `⏳ تم تخطي حد الطلبات بالدقيقة — إعادة المحاولة خلال ${Math.round(waitMs/1000)} ثانية…`;
+          await new Promise(r => setTimeout(r, waitMs));
+        }else{
+          attemptsOnThisKey++;
+          if(attemptsOnThisKey >= 2){
+            extractionResults[page] = { fail:true, note: err.message };
+            appendLive(page, err.message, true);
+            succeeded = true;
+          }else{
+            await new Promise(r => setTimeout(r, 1200));
+          }
+        }
+      }
+    }
+
+    lastCompletedPage = page;
+    const doneCount = page - rangeStart + 1;
+    liveCount.textContent = `${doneCount} / ${totalInRange} صفحة`;
+    exBarFill.style.width = `${Math.round((doneCount/totalInRange)*100)}%`;
+    refreshDownload();
+
+    const pacingMs = model.includes('lite') ? 2200 : 4300;
+    await new Promise(r => setTimeout(r, pacingMs));
+  }
+
+  extractionRunning = false;
+  pauseBtn.style.display = 'none';
+  doneStrip.style.display = 'flex';
+  releaseWakeLockIfIdle();
+  const anyFail = Object.values(extractionResults).some(r => r.fail);
+  doneMsg.textContent = anyFail
+    ? `اكتمل الاستخراج مع تعذّر بعض الصفحات (${totalInRange} صفحة)`
+    : `اكتمل استخراج نص ${totalInRange} صفحة بنجاح`;
+  refreshDownload();
+}
+
+extractBtn.addEventListener('click', () => {
+  if(Object.keys(extractionResults).length > 0 && lastCompletedPage > 0){
+    runExtraction(lastCompletedPage + 1);
+  }else{
+    resetExtraction();
+    runExtraction(parseInt(fromPageInput.value,10) || 1);
+  }
+});
+
+exportProgressBtn.addEventListener('click', () => {
+  if(!currentFile || totalPages === 0){
+    showError('لا يوجد ملف محوّل بعد لتصدير تقدمه.');
+    return;
+  }
+  const snapshot = {
+    version: 1,
+    fileName: currentFile.name,
+    fileSize: currentFile.size,
+    totalPages,
+    rangeStart,
+    rangeEnd,
+    model: modelSelect.value,
+    skipFootnotes: document.getElementById('skipFootnotes').value,
+    lastCompletedPage,
+    extractionResults
+  };
+  const blob = new Blob([JSON.stringify(snapshot)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${currentFile.name.replace(/\.pdf$/i,'')}-progress.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+});
+
+importProgressLabel.addEventListener('click', () => importProgressInput.click());
+
+importProgressInput.addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if(!file) return;
+  importWarnBox.classList.remove('show');
+
+  if(!currentFile || totalPages === 0){
+    showError('ارفع نفس ملف PDF أولاً حتى يتحول لصور، ثم استورد ملف التقدم.');
+    importProgressInput.value = '';
+    return;
+  }
+
+  try{
+    const text = await file.text();
+    const snapshot = JSON.parse(text);
+    if(!snapshot || !snapshot.extractionResults){
+      showError('ملف التقدم غير صالح.');
+      importProgressInput.value = '';
+      return;
+    }
+    if(snapshot.fileName && snapshot.fileName !== currentFile.name){
+      importWarnBox.textContent = `تنبيه: ملف التقدم كان لملف باسم "${snapshot.fileName}" بينما الملف الحالي "${currentFile.name}". تأكد أنه نفس الكتاب قبل المتابعة.`;
+      importWarnBox.classList.add('show');
+    }
+
+    extractionResults = {};
+    Object.keys(snapshot.extractionResults).forEach(k => {
+      extractionResults[k] = snapshot.extractionResults[k];
+    });
+    lastCompletedPage = snapshot.lastCompletedPage || 0;
+    rangeStart = snapshot.rangeStart || 1;
+    rangeEnd = snapshot.rangeEnd || totalPages;
+    fromPageInput.value = rangeStart;
+    toPageInput.value = rangeEnd;
+    if(snapshot.model){
+      modelSelect.value = snapshot.model;
+    }
+    if(snapshot.skipFootnotes){
+      document.getElementById('skipFootnotes').value = snapshot.skipFootnotes;
+    }
+    currentKeyIdx = 0;
+
+    textLive.innerHTML = '';
+    const pageNums = Object.keys(extractionResults).map(n => parseInt(n,10)).sort((a,b) => a-b);
+    pageNums.forEach(p => {
+      const r = extractionResults[p];
+      appendLive(p, r.fail ? r.note : r.text, !!r.fail);
+    });
+    liveHeader.style.display = 'flex';
+    exBarTrack.style.display = 'block';
+    textLive.style.display = 'block';
+    const totalInRange = rangeEnd - rangeStart + 1;
+    const doneCount = Math.max(0, lastCompletedPage - rangeStart + 1);
+    liveCount.textContent = `${doneCount} / ${totalInRange} صفحة`;
+    exBarFill.style.width = `${Math.round((doneCount/totalInRange)*100)}%`;
+    refreshDownload();
+
+    doneStrip.style.display = 'flex';
+    doneMsg.textContent = lastCompletedPage >= rangeEnd
+      ? 'تم استيراد تقدم مكتمل بالفعل'
+      : `تم استيراد التقدم — آخر صفحة مُنجزة: ${lastCompletedPage}`;
+    extractBtn.style.display = 'inline-block';
+    extractBtn.textContent = lastCompletedPage >= rangeEnd ? 'إعادة الاستخراج من البداية' : 'استكمال الاستخراج';
+  }catch(err){
+    console.error(err);
+    showError('تعذّر قراءة ملف التقدم. تأكد أنه الملف الصحيح.');
+  }finally{
+    importProgressInput.value = '';
+  }
+});
+
+pauseBtn.addEventListener('click', () => {
+  if(extractionRunning){
+    stopAfterCurrent = true;
+    pauseBtn.disabled = true;
+    pauseBtn.textContent = 'جارٍ الإيقاف…';
+    setTimeout(() => { pauseBtn.disabled = false; }, 400);
+  }else if(extractionPaused){
+    extractionPaused = false;
+    stopAfterCurrent = false;
+    pauseBtn.textContent = 'إيقاف مؤقت';
+    runExtraction(lastCompletedPage + 1);
+  }
+});
+
+resumeBtn.addEventListener('click', () => {
+  currentKeyIdx = 0;
+  exhaustedBox.classList.remove('show');
+  runExtraction(lastCompletedPage + 1);
+});
+
+/* ================= المرحلة ٣: تحليل الهيكل + توليد الشرح والأسئلة (من أداة شرح الكتاب) ================= */
+const ordinalPattern = '(?:الأول|الثاني|الثالث|الرابع|الخامس|السادس|السابع|الثامن|التاسع|العاشر|الحادي عشر|الثاني عشر|الثالث عشر|الرابع عشر|الخامس عشر|السادس عشر|السابع عشر|الثامن عشر|التاسع عشر|العشرون)';
+const levelDefs = [
+  { key:'section', label:'القسم', arName:'قسم' },
+  { key:'part', label:'الباب', arName:'باب' },
+  { key:'chapter', label:'الفصل', arName:'فصل' },
+  { key:'topic', label:'المبحث', arName:'مبحث' },
+  { key:'subtopic', label:'المطلب', arName:'مطلب' },
+];
+levelDefs.forEach(l => { l.regex = new RegExp(`^${l.label}\\s+${ordinalPattern}\\s*$`); });
+
+function cleanLines(text){
+  return text.split(/\r?\n/).filter(line => {
+    const t = line.trim();
+    if(/^---\s*الصفحة\s*\d+\s*---$/.test(t)) return false;
+    if(/^-\s*\d+\s*-$/.test(t)) return false;
+    return true;
+  });
+}
+function isTocMarker(t){ return t === 'فهرس الموضوعات' || t === 'قائمة المراجع' || t === 'رقم الصفحة' || t === 'الموضوع'; }
+function isDotLeaderLine(t){ return /\.{2,}\s*\d+\s*$/.test(t) || /^\d+\s*\.{2,}/.test(t); }
+
+function parseBook(rawText){
+  const lines = cleanLines(rawText);
+  const n = lines.length;
+  const excluded = new Array(n).fill(false);
+  {
+    let i = 0;
+    while(i < n){
+      const t = lines[i].trim();
+      if(isTocMarker(t) || isDotLeaderLine(t)){
+        let lastHit = i, j = i;
+        while(j < n){
+          const tj = lines[j].trim();
+          if(isTocMarker(tj) || isDotLeaderLine(tj)) lastHit = j;
+          if(j - lastHit > 20) break;
+          j++;
+        }
+        for(let k=i;k<=lastHit;k++) excluded[k] = true;
+        i = lastHit + 1;
+      } else { i++; }
+    }
+    for(let z=0; z<n; z++){
+      if(excluded[z] && (z===0 || !excluded[z-1])){
+        let back = z-1, steps = 0;
+        while(back >= 0 && steps < 8){
+          const t = lines[back].trim();
+          const isBareHeading = levelDefs.some(l => l.regex.test(t));
+          if(t === '' || isBareHeading){ excluded[back] = true; back--; steps++; }
+          else break;
+        }
+      }
+    }
+  }
+
+  let matches = [];
+  for(let idx=0; idx<n; idx++){
+    if(excluded[idx]) continue;
+    const t = lines[idx].trim();
+    if(!t) continue;
+    for(let lvl=0; lvl<levelDefs.length; lvl++){
+      if(levelDefs[lvl].regex.test(t)){ matches.push({level:lvl, lineIdx:idx}); break; }
+    }
+  }
+  matches.forEach((h,i)=>{
+    let j = h.lineIdx+1;
+    while(j<n && (excluded[j] || !lines[j].trim())) j++;
+    const nextHeadingLine = (i+1<matches.length) ? matches[i+1].lineIdx : n;
+    if(j < nextHeadingLine){ h.title = lines[j].trim(); h.titleLineIdx = j; }
+    else { h.title = '(بدون عنوان)'; }
+  });
+  matches.forEach((h,i)=>{
+    const startLine = (h.titleLineIdx !== undefined ? h.titleLineIdx : h.lineIdx) + 1;
+    const endLine = (i+1<matches.length) ? matches[i+1].lineIdx : n;
+    const chunk = [];
+    for(let k=startLine;k<endLine;k++){ if(!excluded[k]) chunk.push(lines[k]); }
+    h.content = chunk.join('\n').trim();
+  });
+
+  const root = { level:-1, title:'root', content:'', children:[] };
+  const stack = [root];
+  matches.forEach(h=>{
+    const node = { level:h.level, title:h.title, content:h.content, children:[] };
+    while(stack.length>1 && stack[stack.length-1].level >= h.level) stack.pop();
+    stack[stack.length-1].children.push(node);
+    stack.push(node);
+  });
+
+  const leaves = [];
+  function collect(node, ancestorIntros){
+    if(node.level >= 0){
+      if(node.children.length === 0){
+        const fullText = ancestorIntros.concat(node.content ? [node.content] : []).join('\n\n').trim();
+        node.unitId = leaves.length;
+        leaves.push({ id: leaves.length, level: node.level, title: node.title, text: fullText, node });
+        return;
+      } else {
+        const newIntros = node.content && node.content.trim() ? ancestorIntros.concat([node.content.trim()]) : ancestorIntros;
+        node.children.forEach(c => collect(c, newIntros));
+        return;
+      }
+    }
+    node.children.forEach(c => collect(c, ancestorIntros));
+  }
+  collect(root, []);
+
+  const stats = { section:0, part:0, chapter:0, topic:0, subtopic:0 };
+  matches.forEach(h => { stats[levelDefs[h.level].key]++; });
+
+  return { root, leaves, stats, matchesCount: matches.length };
+}
+
+function renderTreeText(root){
+  const lines = [];
+  function walk(node, depth){
+    if(node.level >= 0){
+      const indent = '  '.repeat(node.level);
+      const isLeaf = node.children.length === 0;
+      lines.push(`${indent}[${levelDefs[node.level].arName}]${isLeaf ? ' ●' : ''} ${node.title}`);
+    }
+    node.children.forEach(c => walk(c, depth+1));
+  }
+  walk(root, 0);
+  return lines.join('\n');
+}
+
+/* حالة مرحلة التوليد */
+let parsedBook = null;
+let aiResults = {};
+let lastCompletedIdx = -1;
+let genRunning = false;
+let genPaused = false;
+let genStopAfterCurrent = false;
+let genKeyIdx = 0;
+let docxBlobUrl = null;
+
+const statsGrid = document.getElementById('statsGrid');
+const treeBox = document.getElementById('treeBox');
+const warnLine = document.getElementById('warnLine');
+const genDivider = document.getElementById('genDivider');
+const stepLabel3 = document.getElementById('stepLabel3');
+const stepNum3 = document.getElementById('stepNum3');
+const genSection = document.getElementById('genSection');
+const wordCountSelect = document.getElementById('wordCount');
+const mcqCountSelect = document.getElementById('mcqCount');
+const essayCountSelect = document.getElementById('essayCount');
+const genBtn = document.getElementById('genBtn');
+const genPauseBtn = document.getElementById('genPauseBtn');
+const genExhaustedBox = document.getElementById('genExhaustedBox');
+const genExhaustedIdx = document.getElementById('genExhaustedIdx');
+const genResumeBtn = document.getElementById('genResumeBtn');
+const genStatusBox = document.getElementById('genStatusBox');
+const genStatusText = document.getElementById('genStatusText');
+const genStatusCount = document.getElementById('genStatusCount');
+const genBarFill = document.getElementById('genBarFill');
+const liveList = document.getElementById('liveList');
+const genDoneStrip = document.getElementById('genDoneStrip');
+const genDoneMsg = document.getElementById('genDoneMsg');
+const dlDocxBtn = document.getElementById('dlDocxBtn');
+const genExportProgressBtn = document.getElementById('genExportProgressBtn');
+const genImportProgressLabel = document.getElementById('genImportProgressLabel');
+const genImportProgressInput = document.getElementById('genImportProgressInput');
+const genImportWarnBox = document.getElementById('genImportWarnBox');
+
+function hideGenStage(){
+  genDivider.style.display = 'none';
+  stepLabel3.style.display = 'none';
+  statsGrid.style.display = 'none';
+  treeBox.style.display = 'none';
+  warnLine.style.display = 'none';
+  genSection.classList.remove('show');
+  parsedBook = null;
+}
+
+function resetGenUI(){
+  aiResults = {}; lastCompletedIdx = -1; genRunning = false; genPaused = false; genStopAfterCurrent = false; genKeyIdx = 0;
+  if(docxBlobUrl){ URL.revokeObjectURL(docxBlobUrl); docxBlobUrl = null; }
+  genExhaustedBox.classList.remove('show');
+  genStatusBox.classList.remove('show');
+  liveList.style.display = 'none'; liveList.innerHTML = '';
+  genDoneStrip.style.display = 'none';
+  genPauseBtn.style.display = 'none';
+  genBtn.style.display = 'inline-block'; genBtn.textContent = 'ابدأ توليد الشرح والأسئلة'; genBtn.disabled = false;
+  genBarFill.style.width = '0%';
+}
+
+/* الاستلام التلقائي للنص المستخرج من المرحلة السابقة — بدون رفع ملف وسيط */
+function proceedToGeneration(){
+  const rawText = buildFullText();
+  if(!rawText.trim()){
+    showError('لا يوجد نص مستخرج للمتابعة — تأكد من اكتمال مرحلة الاستخراج أولاً.');
+    return;
+  }
+  errorBox.classList.remove('show');
+  try{
+    parsedBook = parseBook(rawText);
+    document.getElementById('statSection').textContent = parsedBook.stats.section;
+    document.getElementById('statPart').textContent = parsedBook.stats.part;
+    document.getElementById('statChapter').textContent = parsedBook.stats.chapter;
+    document.getElementById('statTopic').textContent = parsedBook.stats.topic;
+    document.getElementById('statLeaf').textContent = parsedBook.leaves.length;
+    statsGrid.style.display = 'grid';
+    treeBox.style.display = 'block';
+    treeBox.textContent = renderTreeText(parsedBook.root);
+    warnLine.style.display = 'block';
+    genDivider.style.display = 'flex';
+    stepLabel3.style.display = 'flex';
+    stepNum2.classList.add('done');
+    genSection.classList.add('show');
+    resetGenUI();
+    document.getElementById('step3Anchor').scrollIntoView({ behavior:'smooth', block:'start' });
+  }catch(err){
+    console.error(err);
+    showError('تعذّر تحليل النص المستخرج لبناء الهيكل الهرمي لكتابك. راجع صيغة العناوين في النص.');
+  }
+}
+continueToGenBtn.addEventListener('click', proceedToGeneration);
+
+const wordCountText = { short:'حوالي 150 كلمة', medium:'حوالي 300 كلمة', long:'حوالي 450 كلمة' };
+
+async function callGeminiForUnit(unit, apiKey, model, wcOption, mcqCount, essayCount){
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const pathLabel = unit.pathLabel || unit.title;
+  const prompt = `أنت أستاذ جامعي متخصص في القانون، مهمتك مساعدة طالب حقوق يذاكر لامتحان فعلي — الأولوية القصوى هي إفادة الطالب أكاديميًا، وليس مجرد تلخيص النص.
+
+عنوان هذا الجزء ضمن الكتاب: "${pathLabel}"
+النص الأصلي لهذا الجزء:
+"""
+${unit.text}
+"""
+
+المطلوب أولاً — الشرح:
+اكتب شرحًا أكاديميًا واضحًا بالعربية الفصحى السهلة (${wordCountText[wcOption]})، يعيد صياغة الأفكار القانونية بأسلوب مبسط ومنظم (قدّم التعريفات أولاً، ثم الشروط أو الأركان، ثم الأمثلة أو التطبيقات إن وردت)، بدون الإخلال بالدقة القانونية، وبدون إضافة معلومات من خارج النص المعطى.
+
+المطلوب ثانياً — أسئلة الاختيار من متعدد (بالضبط ${mcqCount} أسئلة):
+- كل سؤال يجب أن يختبر فهم الطالب للفكرة القانونية (تعريف، شرط، استثناء، تفرقة بين مفهومين) وليس مجرد استرجاع كلمة من النص حرفيًا.
+- الخيارات الأربعة يجب أن تكون كلها معقولة ومتقاربة في الصياغة (تجنّب الخيارات الساذجة أو الواضح خطؤها)، بحيث يحتاج الطالب فعلاً للفهم لا للتخمين.
+- نوّع بين أسئلة التعريف، وأسئلة "أيهما ليس من..."، وأسئلة تطبيق الفكرة على مثال قصير، وأسئلة التفرقة بين مصطلحين متقاربين إن أمكن.
+
+المطلوب ثالثاً — الأسئلة المقالية (بالضبط ${essayCount} أسئلة):
+- يجب أن تكون أسئلة تحليلية أو تطبيقية حقيقية (اشرح، ناقش، قارن، بيّن العلاقة بين، ما رأيك في تطبيق كذا على حالة كذا) — وليست أسئلة استرجاع سطحية مثل "عرّف كذا" فقط.
+- كل سؤال يجب أن يكون قابلاً للإجابة بالاعتماد على محتوى هذا الجزء فقط.
+
+أعد النتيجة بصيغة JSON فقط، بدون أي نص أو علامات إضافية قبله أو بعده، وبدون أي إشارة داخل نص الأسئلة نفسها لكونها مأخوذة من "النص" أو "المقطع" (صُغ كل سؤال كسؤال أكاديمي مستقل تمامًا)، بالشكل التالي بالضبط:
+{
+  "explanation": "الشرح الكامل هنا",
+  "mcq": [
+    {"question": "نص السؤال", "choices": ["اختيار 1", "اختيار 2", "اختيار 3", "اختيار 4"], "correct_index": 0}
+  ],
+  "essay": ["سؤال مقالي تحليلي أول", "سؤال مقالي تحليلي ثانٍ"]
+}
+يجب أن يحتوي "mcq" على ${mcqCount} عنصر بالضبط، و"essay" على ${essayCount} عنصر بالضبط.`;
+
+  const body = {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: { temperature: 0.4, responseMimeType: 'application/json' }
+  };
+  let res;
+  try{
+    res = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  }catch(networkErr){
+    const e = new Error('تعذّر الاتصال بالشبكة'); e.status = 0; throw e;
+  }
+  if(!res.ok){
+    let msg = `HTTP ${res.status}`;
+    try{ const errJson = await res.json(); if(errJson.error && errJson.error.message) msg = errJson.error.message; }catch(e){}
+    const e = new Error(msg); e.status = res.status; throw e;
+  }
+  const data = await res.json();
+  let text = data?.candidates?.[0]?.content?.parts?.map(p=>p.text||'').join('') || '';
+  text = text.trim().replace(/^```json/i,'').replace(/^```/,'').replace(/```$/,'').trim();
+  let parsed;
+  try{ parsed = JSON.parse(text); }
+  catch(parseErr){
+    const e = new Error('تعذّر تفسير استجابة النموذج كـ JSON');
+    e.status = -1; e.rawText = text;
+    throw e;
+  }
+  return parsed;
+}
+
+function assignPathLabels(root){
+  function walk(node, pathParts){
+    if(node.level >= 0){
+      const parts = pathParts.concat([node.title]);
+      if(node.children.length === 0 && node.unitId !== undefined){
+        node.pathLabel = parts.join(' > ');
+      }
+      node.children.forEach(c => walk(c, parts));
+    } else {
+      node.children.forEach(c => walk(c, pathParts));
+    }
+  }
+  walk(root, []);
+}
+
+function appendLiveItem(idx, title, ok, note){
+  const div = document.createElement('div');
+  div.className = 'live-item ' + (ok ? 'ok' : 'fail');
+  div.innerHTML = `<span>${ok ? '✓' : '✕'}</span><span class="t">${idx+1}. ${title}${ok ? '' : ' — ' + (note||'')}</span>`;
+  liveList.appendChild(div);
+  liveList.scrollTop = liveList.scrollHeight;
+}
+
+async function runGeneration(startIdx){
+  const keys = collectKeys();
+  if(keys.length === 0){ showError('الرجاء إدخال مفتاح Gemini API واحد على الأقل (في مربع المفاتيح بالخطوة ٢ أعلاه).'); return; }
+  errorBox.classList.remove('show');
+  genExhaustedBox.classList.remove('show');
+
+  assignPathLabels(parsedBook.root);
+  const leaves = parsedBook.leaves;
+  const model = modelSelect.value;
+  const wcOption = wordCountSelect.value;
+  const mcqCount = parseInt(mcqCountSelect.value, 10);
+  const essayCount = parseInt(essayCountSelect.value, 10);
+
+  genStatusBox.classList.add('show');
+  liveList.style.display = 'block';
+  genDoneStrip.style.display = 'none';
+  genBtn.style.display = 'none';
+  genPauseBtn.style.display = 'inline-block';
+  genPauseBtn.textContent = 'إيقاف مؤقت';
+  genRunning = true; genPaused = false; genStopAfterCurrent = false;
+  requestWakeLock();
+
+  const total = leaves.length;
+
+  for(let i = startIdx; i < total; i++){
+    if(genStopAfterCurrent){
+      genRunning = false; genPaused = true; genPauseBtn.textContent = 'استكمال';
+      releaseWakeLockIfIdle();
+      return;
+    }
+    const unit = leaves[i];
+    unit.pathLabel = unit.node.pathLabel || unit.title;
+
+    let succeeded = false, attemptsOnThisKey = 0, rateLimitBackoffs = 0;
+    while(!succeeded){
+      if(genKeyIdx >= keys.length){
+        genExhaustedIdx.textContent = i+1;
+        genExhaustedBox.classList.add('show');
+        genRunning = false;
+        genPauseBtn.style.display = 'none';
+        buildDocxAndEnableDownload();
+        genDoneStrip.style.display = 'flex';
+        genDoneMsg.textContent = `توقّف عند الجزء ${i+1} من ${total} — نفدت حدود كل المفاتيح`;
+        releaseWakeLockIfIdle();
+        return;
+      }
+      try{
+        const parsed = await callGeminiForUnit(unit, keys[genKeyIdx], model, wcOption, mcqCount, essayCount);
+        aiResults[unit.id] = {
+          fail:false,
+          explanation: parsed.explanation || '',
+          mcq: Array.isArray(parsed.mcq) ? parsed.mcq : [],
+          essay: Array.isArray(parsed.essay) ? parsed.essay : []
+        };
+        appendLiveItem(i, unit.pathLabel, true);
+        succeeded = true;
+      }catch(err){
+        console.error('unit', i, 'key', genKeyIdx, err);
+        if(isKeyExhaustedError(err.status, err.message)){
+          genKeyIdx++; attemptsOnThisKey = 0; rateLimitBackoffs = 0; continue;
+        }else if(err.status === 429){
+          rateLimitBackoffs++;
+          if(rateLimitBackoffs > 6){ genKeyIdx++; attemptsOnThisKey = 0; rateLimitBackoffs = 0; continue; }
+          const waitMs = Math.min(4000 * rateLimitBackoffs, 30000);
+          genStatusText.textContent = `⏳ تم تخطي حد الطلبات بالدقيقة — إعادة المحاولة خلال ${Math.round(waitMs/1000)} ثانية…`;
+          await new Promise(r => setTimeout(r, waitMs));
+        }else{
+          attemptsOnThisKey++;
+          if(attemptsOnThisKey >= 2){
+            aiResults[unit.id] = { fail:true, note: err.message, explanation:'', mcq:[], essay:[] };
+            appendLiveItem(i, unit.pathLabel, false, err.message);
+            succeeded = true;
+          }else{
+            await new Promise(r => setTimeout(r, 1200));
+          }
+        }
+      }
+    }
+
+    lastCompletedIdx = i;
+    genStatusCount.textContent = `${i+1} / ${total}`;
+    genStatusText.textContent = 'جارٍ توليد الشرح والأسئلة…';
+    genBarFill.style.width = `${Math.round(((i+1)/total)*100)}%`;
+    buildDocxAndEnableDownload();
+
+    const pacingMs = model.includes('lite') ? 2200 : 4300;
+    await new Promise(r => setTimeout(r, pacingMs));
+  }
+
+  genRunning = false;
+  genPauseBtn.style.display = 'none';
+  genDoneStrip.style.display = 'flex';
+  releaseWakeLockIfIdle();
+  const anyFail = Object.values(aiResults).some(r => r.fail);
+  genDoneMsg.textContent = anyFail ? `اكتمل التوليد مع تعذّر بعض الأجزاء (${total} جزء)` : `اكتمل توليد ${total} جزء بنجاح`;
+  buildDocxAndEnableDownload();
+}
+
+genBtn.addEventListener('click', () => {
+  if(!parsedBook){ showError('أكمل مرحلتي الرفع والاستخراج أولاً.'); return; }
+  if(Object.keys(aiResults).length > 0 && lastCompletedIdx >= 0){
+    runGeneration(lastCompletedIdx + 1);
+  }else{
+    resetGenUI();
+    runGeneration(0);
+  }
+});
+genPauseBtn.addEventListener('click', () => {
+  if(genRunning){
+    genStopAfterCurrent = true; genPauseBtn.disabled = true; genPauseBtn.textContent = 'جارٍ الإيقاف…';
+    setTimeout(()=>{ genPauseBtn.disabled = false; }, 400);
+  }else if(genPaused){
+    genPaused = false; genStopAfterCurrent = false; genPauseBtn.textContent = 'إيقاف مؤقت';
+    runGeneration(lastCompletedIdx + 1);
+  }
+});
+genResumeBtn.addEventListener('click', () => {
+  genKeyIdx = 0; genExhaustedBox.classList.remove('show');
+  runGeneration(lastCompletedIdx + 1);
+});
+
+genExportProgressBtn.addEventListener('click', () => {
+  if(!parsedBook){ showError('لا يوجد كتاب مُحلَّل بعد.'); return; }
+  const snapshot = {
+    version: 1,
+    fileName: currentFile ? currentFile.name : '',
+    totalLeaves: parsedBook.leaves.length,
+    lastCompletedIdx,
+    model: modelSelect.value,
+    wordCount: wordCountSelect.value,
+    mcqCount: mcqCountSelect.value,
+    essayCount: essayCountSelect.value,
+    aiResults
+  };
+  const blob = new Blob([JSON.stringify(snapshot)], { type:'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `${(currentFile?currentFile.name.replace(/\.pdf$/i,''):'book')}-gen-progress.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 2000);
+});
+genImportProgressLabel.addEventListener('click', () => genImportProgressInput.click());
+genImportProgressInput.addEventListener('change', async (e) => {
+  const file = e.target.files[0]; if(!file) return;
+  genImportWarnBox.classList.remove('show');
+  if(!parsedBook){ showError('أعد استخراج نفس نص الكتاب أولاً (خطوة ١+٢) حتى يُحلَّل هيكله، ثم استورد ملف تقدم التوليد.'); genImportProgressInput.value=''; return; }
+  try{
+    const text = await file.text();
+    const snapshot = JSON.parse(text);
+    if(!snapshot || !snapshot.aiResults){ showError('ملف التقدم غير صالح.'); genImportProgressInput.value=''; return; }
+    if(snapshot.fileName && currentFile && snapshot.fileName !== currentFile.name){
+      genImportWarnBox.textContent = `تنبيه: ملف التقدم كان لملف باسم "${snapshot.fileName}" بينما الملف الحالي "${currentFile.name}".`;
+      genImportWarnBox.classList.add('show');
+    }
+    aiResults = {};
+    Object.keys(snapshot.aiResults).forEach(k => { aiResults[k] = snapshot.aiResults[k]; });
+    lastCompletedIdx = typeof snapshot.lastCompletedIdx === 'number' ? snapshot.lastCompletedIdx : -1;
+    if(snapshot.model) modelSelect.value = snapshot.model;
+    if(snapshot.wordCount) wordCountSelect.value = snapshot.wordCount;
+    if(snapshot.mcqCount) mcqCountSelect.value = snapshot.mcqCount;
+    if(snapshot.essayCount) essayCountSelect.value = snapshot.essayCount;
+    genKeyIdx = 0;
+
+    liveList.innerHTML = '';
+    liveList.style.display = 'block';
+    assignPathLabels(parsedBook.root);
+    parsedBook.leaves.forEach(u => {
+      const r = aiResults[u.id];
+      if(r) appendLiveItem(u.id, u.node.pathLabel || u.title, !r.fail, r.note);
+    });
+    genStatusBox.classList.add('show');
+    const total = parsedBook.leaves.length;
+    const doneCount = lastCompletedIdx + 1;
+    genStatusCount.textContent = `${doneCount} / ${total}`;
+    genBarFill.style.width = `${Math.round((doneCount/total)*100)}%`;
+    buildDocxAndEnableDownload();
+    genDoneStrip.style.display = 'flex';
+    genDoneMsg.textContent = lastCompletedIdx >= total-1 ? 'تم استيراد تقدم مكتمل بالفعل' : `تم استيراد التقدم — آخر جزء مُنجز: ${doneCount} من ${total}`;
+    genBtn.style.display = 'inline-block';
+    genBtn.textContent = lastCompletedIdx >= total-1 ? 'إعادة التوليد من البداية' : 'استكمال التوليد';
+  }catch(err){
+    console.error(err);
+    showError('تعذّر قراءة ملف التقدم. تأكد أنه الملف الصحيح.');
+  }finally{
+    genImportProgressInput.value = '';
+  }
+});
+
+/* ================= بناء ملف Word ================= */
+function escXml(s){
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&apos;');
+}
+function paraXml(text, styleId, opts){
+  opts = opts || {};
+  const bold = opts.bold ? '<w:b/>' : '';
+  const styleTag = styleId ? `<w:pStyle w:val="${styleId}"/>` : '';
+  const jc = opts.center ? '<w:jc w:val="center"/>' : '<w:jc w:val="right"/>';
+  const lines = String(text||'').split(/\n+/);
+  const runs = lines.map((ln,i) => {
+    const br = i>0 ? '<w:br/>' : '';
+    return `<w:r><w:rPr><w:rtl/>${bold}</w:rPr>${br}<w:t xml:space="preserve">${escXml(ln)}</w:t></w:r>`;
+  }).join('');
+  return `<w:p><w:pPr><w:bidi/>${styleTag}${jc}</w:pPr>${runs}</w:p>`;
+}
+function pageBreakXml(){
+  return `<w:p><w:r><w:br w:type="page"/></w:r></w:p>`;
+}
+
+function buildDocumentXmlBody(){
+  let body = '';
+  body += paraXml('ملخص وأسئلة مراجعة للكتاب', 'Heading1', {center:true});
+  if(currentFile) body += paraXml(currentFile.name.replace(/\.pdf$/i,''), 'Normal', {center:true});
+  body += pageBreakXml();
+
+  const levelStyles = ['Heading1','Heading2','Heading3','Heading4','Heading5'];
+  function walk(node){
+    if(node.level >= 0){
+      const styleId = levelStyles[Math.min(node.level,4)];
+      body += paraXml(node.title, styleId);
+      if(node.children.length === 0){
+        const r = aiResults[node.unitId];
+        if(r && !r.fail){
+          if(r.explanation) body += paraXml(r.explanation, 'Normal');
+          if(r.mcq && r.mcq.length){
+            body += paraXml('أسئلة اختيار من متعدد', 'Normal', {bold:true});
+            const letters = ['أ','ب','ج','د'];
+            r.mcq.forEach((q,qi) => {
+              body += paraXml(`${qi+1}. ${q.question||''}`, 'Normal');
+              (q.choices||[]).forEach((ch,ci) => { body += paraXml(`   ${letters[ci]}) ${ch}`, 'Normal'); });
+              const correctLetter = letters[q.correct_index] || '';
+              body += paraXml(`   ✔ الإجابة الصحيحة: ${correctLetter}`, 'Normal', {bold:true});
+            });
+          }
+          if(r.essay && r.essay.length){
+            body += paraXml('أسئلة مقالية للمراجعة', 'Normal', {bold:true});
+            r.essay.forEach((q,qi) => { body += paraXml(`${qi+1}. ${q}`, 'Normal'); });
+          }
+        } else if(r && r.fail){
+          body += paraXml(`[تعذّر توليد شرح هذا الجزء: ${r.note||''}]`, 'Normal');
+        } else {
+          body += paraXml('(لم تتم معالجة هذا الجزء بعد)', 'Normal');
+        }
+      }
+      node.children.forEach(walk);
+    } else {
+      node.children.forEach(walk);
+    }
+  }
+  walk(parsedBook.root);
+
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:body>${body}
+<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1417" w:right="1417" w:bottom="1417" w:left="1417" w:header="708" w:footer="708" w:gutter="0"/><w:bidi/></w:sectPr>
+</w:body>
+</w:document>`;
+}
+
+const STYLES_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:docDefaults>
+  <w:rPrDefault><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:sz w:val="22"/><w:szCs w:val="22"/><w:rtl/></w:rPr></w:rPrDefault>
+  <w:pPrDefault><w:pPr><w:bidi/></w:pPr></w:pPrDefault>
+</w:docDefaults>
+<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:pPr><w:spacing w:after="140"/></w:pPr></w:style>
+<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:pPr><w:spacing w:before="260" w:after="140"/></w:pPr><w:rPr><w:b/><w:sz w:val="36"/><w:szCs w:val="36"/><w:color w:val="2B5F56"/></w:rPr></w:style>
+<w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/><w:basedOn w:val="Normal"/><w:pPr><w:spacing w:before="220" w:after="120"/></w:pPr><w:rPr><w:b/><w:sz w:val="32"/><w:szCs w:val="32"/><w:color w:val="2B5F56"/></w:rPr></w:style>
+<w:style w:type="paragraph" w:styleId="Heading3"><w:name w:val="heading 3"/><w:basedOn w:val="Normal"/><w:pPr><w:spacing w:before="200" w:after="100"/></w:pPr><w:rPr><w:b/><w:sz w:val="28"/><w:szCs w:val="28"/><w:color w:val="2B5F56"/></w:rPr></w:style>
+<w:style w:type="paragraph" w:styleId="Heading4"><w:name w:val="heading 4"/><w:basedOn w:val="Normal"/><w:pPr><w:spacing w:before="180" w:after="90"/></w:pPr><w:rPr><w:b/><w:sz w:val="26"/><w:szCs w:val="26"/><w:color w:val="C1502E"/></w:rPr></w:style>
+<w:style w:type="paragraph" w:styleId="Heading5"><w:name w:val="heading 5"/><w:basedOn w:val="Normal"/><w:pPr><w:spacing w:before="160" w:after="80"/></w:pPr><w:rPr><w:b/><w:sz w:val="24"/><w:szCs w:val="24"/><w:color w:val="C1502E"/></w:rPr></w:style>
+</w:styles>`;
+
+const CONTENT_TYPES_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
+</Types>`;
+
+const RELS_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
+</Relationships>`;
+
+const DOC_RELS_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>`;
+
+function coreXml(){
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/">
+<dc:title>${escXml(currentFile ? currentFile.name : 'ملخص الكتاب')}</dc:title>
+<dc:creator>أداة شاملة — من PDF إلى شرح وأسئلة أكاديمية</dc:creator>
+</cp:coreProperties>`;
+}
+
+async function buildDocxAndEnableDownload(){
+  if(!parsedBook) return;
+  try{
+    const zip = new JSZip();
+    zip.file('[Content_Types].xml', CONTENT_TYPES_XML);
+    zip.folder('_rels').file('.rels', RELS_XML);
+    zip.folder('docProps').file('core.xml', coreXml());
+    const wordFolder = zip.folder('word');
+    wordFolder.file('document.xml', buildDocumentXmlBody());
+    wordFolder.file('styles.xml', STYLES_XML);
+    wordFolder.folder('_rels').file('document.xml.rels', DOC_RELS_XML);
+
+    const blob = await zip.generateAsync({ type:'blob', mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+    if(docxBlobUrl) URL.revokeObjectURL(docxBlobUrl);
+    docxBlobUrl = URL.createObjectURL(blob);
+    const baseName = currentFile ? currentFile.name.replace(/\.pdf$/i,'') : 'book';
+    dlDocxBtn.onclick = () => {
+      const a = document.createElement('a');
+      a.href = docxBlobUrl; a.download = `${baseName}-شرح-مبسط.docx`;
+      document.body.appendChild(a); a.click(); a.remove();
+    };
+    genDoneStrip.style.display = 'flex';
+  }catch(err){
+    console.error('docx build error', err);
+  }
+}
+</script>
+</body>
+</html>
