@@ -1,0 +1,88 @@
+name: توليد شرح وأسئلة من كتاب PDF
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: 'نموذج Gemini'
+        required: false
+        default: 'gemini-3.5-flash-lite'
+        type: choice
+        options:
+          - gemini-3.5-flash-lite
+          - gemini-3.6-flash
+      word_count:
+        description: 'طول الشرح لكل جزء'
+        required: false
+        default: 'medium'
+        type: choice
+        options:
+          - short
+          - medium
+          - long
+      mcq_count:
+        description: 'عدد أسئلة الاختيار من متعدد لكل جزء'
+        required: false
+        default: '5'
+        type: choice
+        options:
+          - '3'
+          - '5'
+          - '7'
+      essay_count:
+        description: 'عدد الأسئلة المقالية لكل جزء'
+        required: false
+        default: '3'
+        type: choice
+        options:
+          - '2'
+          - '3'
+          - '4'
+      skip_footnotes:
+        description: 'تجاهل الهوامش أسفل الصفحة'
+        required: false
+        default: 'yes'
+        type: choice
+        options:
+          - 'yes'
+          - 'no'
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    # الحد الأقصى لتشغيل أي Job على GitHub Actions هو 6 ساعات (360 دقيقة) — قيد من المنصة نفسها
+    timeout-minutes: 350
+    steps:
+      - name: تنزيل الريبو
+        uses: actions/checkout@v4
+
+      - name: تثبيت أداة تحويل PDF لصور (poppler-utils)
+        run: sudo apt-get update -y && sudo apt-get install -y poppler-utils
+
+      - name: تثبيت Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: تثبيت مكتبات المشروع
+        working-directory: tools-node
+        run: npm install --no-audit --no-fund
+
+      - name: تشغيل خط الأنابيب الكامل
+        working-directory: tools-node
+        env:
+          GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
+          GEMINI_MODEL: ${{ inputs.model }}
+          WORD_COUNT: ${{ inputs.word_count }}
+          MCQ_COUNT: ${{ inputs.mcq_count }}
+          ESSAY_COUNT: ${{ inputs.essay_count }}
+          SKIP_FOOTNOTES: ${{ inputs.skip_footnotes }}
+        run: node generate-book.js
+
+      - name: رفع الملفات الناتجة (Word + النص المستخرج)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: book-output-${{ github.run_number }}
+          path: output/
+          retention-days: 14

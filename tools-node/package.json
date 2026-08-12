@@ -1,0 +1,13 @@
+{
+  "name": "book-generate-tool",
+  "version": "1.0.0",
+  "private": true,
+  "description": "خط أنابيب سحابي: من PDF إلى شرح وأسئلة أكاديمية جاهزة (Word)، يعمل داخل GitHub Actions",
+  "main": "generate-book.js",
+  "dependencies": {
+    "jszip": "^3.10.1"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
