@@ -5,7 +5,8 @@
   "description": "خط أنابيب سحابي: من PDF إلى شرح وأسئلة أكاديمية جاهزة (Word)، يعمل داخل GitHub Actions",
   "main": "generate-book.js",
   "dependencies": {
-    "jszip": "^3.10.1"
+    "jszip": "^3.10.1",
+    "firebase-admin": "^12.6.0"
   },
   "engines": {
     "node": ">=18"
