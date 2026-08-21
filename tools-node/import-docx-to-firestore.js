@@ -179,10 +179,30 @@ async function findOrCreateSubject(name, yearLevel) {
     .where('yearLevel', '==', yearLevel)
     .limit(1).get();
   if (!snap.empty) {
-    return { id: snap.docs[0].id, created: false };
+    const doc = snap.docs[0];
+    // لو المادة موجودة بالفعل بس ناقصها active/order (مثلاً اتعملت بنسخة قديمة
+    // من السكريبت)، نظبطها بنفس الحقول اللي التطبيق محتاجها عشان تظهر.
+    const data = doc.data();
+    const patch = {};
+    if (data.active !== true) patch.active = true;
+    if (typeof data.order !== 'number') patch.order = 0;
+    if (Object.keys(patch).length > 0) {
+      await doc.ref.set(patch, { merge: true });
+    }
+    return { id: doc.id, created: false };
   }
   const ref = db.collection('subjects').doc();
-  await ref.set({ id: ref.id, name, yearLevel, createdAt: Date.now() });
+  // لازم نبعت نفس الحقول اللي التطبيق (Subject.kt) بيعتمد عليها في الفلترة:
+  // active=true و order، وإلا المادة مش هتظهر أبداً في التطبيق رغم إنها
+  // بترفع بنجاح في Firestore.
+  await ref.set({
+    id: ref.id,
+    name,
+    yearLevel,
+    active: true,
+    order: 0,
+    createdAt: Date.now()
+  });
   return { id: ref.id, created: true };
 }
 
