@@ -3,6 +3,11 @@ name: توليد شرح وأسئلة من كتاب PDF
 on:
   workflow_dispatch:
     inputs:
+      book_filename:
+        description: 'اسم الكتاب (أو جزء مميز منه) اللي عايز تعالجه بس — سيبها فاضية عشان يعالج كل الكتب الموجودة في input/'
+        required: false
+        default: ''
+        type: string
       model:
         description: 'نموذج Gemini'
         required: false
@@ -88,6 +93,7 @@ jobs:
         working-directory: tools-node
         env:
           GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
+          BOOK_FILENAME: ${{ inputs.book_filename }}
           GEMINI_MODEL: ${{ inputs.model }}
           WORD_COUNT: ${{ inputs.word_count }}
           MCQ_COUNT: ${{ inputs.mcq_count }}

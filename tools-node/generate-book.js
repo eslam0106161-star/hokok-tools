@@ -815,10 +815,27 @@ async function main() {
     console.error(`❌ مجلد ${INPUT_DIR} غير موجود.`);
     process.exit(1);
   }
-  const pdfs = fs.readdirSync(INPUT_DIR).filter(f => f.toLowerCase().endsWith('.pdf'));
+  let pdfs = fs.readdirSync(INPUT_DIR).filter(f => f.toLowerCase().endsWith('.pdf'));
   if (pdfs.length === 0) {
     console.error(`❌ لا يوجد أي ملف PDF داخل مجلد input/. ارفع ملف PDF هناك أولاً.`);
     process.exit(1);
+  }
+
+  const bookFilter = (process.env.BOOK_FILENAME || '').trim();
+  if (bookFilter) {
+    const filterLower = bookFilter.toLowerCase();
+    const matched = pdfs.filter(f => f.toLowerCase().includes(filterLower));
+    if (matched.length === 0) {
+      console.error(`❌ لا يوجد أي ملف PDF في input/ يطابق "${bookFilter}".`);
+      console.error(`الملفات الموجودة فعليًا:\n${pdfs.map(f => '  - ' + f).join('\n')}`);
+      process.exit(1);
+    }
+    if (matched.length > 1) {
+      console.error(`❌ فيه أكتر من ملف بيطابق "${bookFilter}" — حدد اسم أدق:\n${matched.map(f => '  - ' + f).join('\n')}`);
+      process.exit(1);
+    }
+    pdfs = matched;
+    console.log(`📖 تم اختيار كتاب واحد فقط: "${pdfs[0]}"`);
   }
 
   console.log(`النموذج: ${MODEL} | طول الشرح: ${WORD_COUNT_OPTION} | أسئلة اختيار: ${MCQ_COUNT} | أسئلة مقالية: ${ESSAY_COUNT}`);
