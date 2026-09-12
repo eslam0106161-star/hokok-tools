@@ -25,6 +25,7 @@ const MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
 const WORD_COUNT_OPTION = process.env.WORD_COUNT || 'medium';
 const MCQ_COUNT = parseInt(process.env.MCQ_COUNT || '5', 10);
 const ESSAY_COUNT = parseInt(process.env.ESSAY_COUNT || '3', 10);
+const TF_COUNT = parseInt(process.env.TF_COUNT || '5', 10);
 const SKIP_FOOTNOTES = (process.env.SKIP_FOOTNOTES || 'yes') === 'yes';
 const PDF_DPI = parseInt(process.env.PDF_DPI || '150', 10);
 
@@ -33,6 +34,10 @@ const PDF_DPI = parseInt(process.env.PDF_DPI || '150', 10);
 // الوقت أو حصة الـ API ضيقة.
 const VERIFY_EXTRACTION = (process.env.VERIFY_EXTRACTION || 'yes') === 'yes';
 const VERIFY_CONTENT = (process.env.VERIFY_CONTENT || 'yes') === 'yes';
+// مرحلة تصنيف ذكي للعناوين الغامضة (أولاً/ثانياً، أو عنوان بصري) — استدعاء
+// واحد رخيص لكل كتاب كامل (مش لكل صفحة أو جزء)، بيراجع مستوى العناوين دي
+// بناءً على فهم النموذج للسياق الكامل للكتاب بدل الاعتماد على تخمين محلي بسيط.
+const VERIFY_STRUCTURE = (process.env.VERIFY_STRUCTURE || 'yes') === 'yes';
 
 const API_KEYS = (process.env.GEMINI_API_KEYS || '')
   .split(',').map(s => s.trim()).filter(Boolean);
@@ -82,7 +87,11 @@ async function geminiFetch(url, body) {
 
 async function callGeminiVision(base64Jpeg, apiKey, model, skipFootnotes) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
-  const basePrompt = 'استخرج كل النص الموجود في هذه الصورة بدقة تامة كما هو مكتوب، بنفس اللغة. حافظ على فواصل الفقرات والأسطر قدر الإمكان. لا تضف أي شرح أو تعليق أو مقدمة، أعد النص المستخرج فقط. إذا لم يوجد نص، أعد سطراً فارغاً.';
+  const basePrompt = `استخرج كل النص الموجود في هذه الصورة بدقة تامة كما هو مكتوب، بنفس اللغة. حافظ على فواصل الفقرات والأسطر قدر الإمكان.
+
+تنبيه مهم بخصوص العناوين: كتب القانون غالبًا فيها عناوين وعناوين فرعية متعددة المستويات (باب، فصل، مبحث، مطلب...)، لكن كتير من الكتب بتكتب عناوين مهمة بصريًا (خط عريض bold، أو حجم خط أكبر من باقي الفقرة، أو سطر متوسط في نص الصفحة) من غير أي كلمة زي "باب" أو "فصل" أو "مبحث" قبلها — أمثلة: عنوان مستقل قائم بذاته، أو عنوان مسبوق بكلمة "تمهيد" أو "مقدمة" أو "فصل تمهيدي"، أو عنوان مسبوق بـ"أولاً"/"ثانياً"/"ثالثاً". أي سطر من دول لازم تحطله العلامة "[HEADING] " في أول السطر (قبل نص العنوان نفسه مباشرة) في النص المستخرج، **فقط لو كان شكله البصري في الصورة فعلاً مختلف عن باقي الفقرة** (خط عريض، أو حجم أكبر، أو متوسط الصفحة، أو سطر مستقل قبل فقرة جديدة تمامًا) — لا تحط العلامة دي على جمل عادية في وسط فقرة حتى لو بدأت بكلمة "أولاً" وهي جزء من جملة عادية (مثال: "أولاً، يجب أن نلاحظ أن..." وسط فقرة مش عنوان، بينما "أولاً: نظرية كذا" في سطر مستقل هو عنوان).
+
+لا تضف أي شرح أو تعليق أو مقدمة غير مطلوبة، أعد النص المستخرج فقط (مع علامات [HEADING] المطلوبة). إذا لم يوجد نص، أعد سطراً فارغاً.`;
   const footnotesInstruction = ' تنبيه مهم: قد تحتوي الصفحة على قسم هوامش أو مراجع أسفلها (عادة مفصول عن المتن بخط أفقي، ويبدأ غالباً بأرقام مرجعية مثل (1) أو (2) ويذكر أسماء مؤلفين وكتب ودور نشر وأرقام صفحات). تجاهل هذا القسم تماماً ولا تُدرجه في النص المستخرج، واستخرج فقط نص المتن الأساسي أعلى الخط الفاصل.';
   const promptText = skipFootnotes ? (basePrompt + footnotesInstruction) : basePrompt;
   const body = {
@@ -106,7 +115,9 @@ async function callGeminiVerifyExtraction(base64Jpeg, extractedText, apiKey, mod
 - أرقام المواد القانونية والفصول والبنود
 - التواريخ والسنوات والنسب المئوية والأرقام الترتيبية
 - أسماء الأعلام والمصطلحات القانونية الدقيقة
-صحّح فقط أخطاء الاستخراج (رقم أو كلمة أو حرف غلط عن الصورة). ممنوع منعاً باتاً: إضافة أي معلومة غير موجودة بالصورة، حذف أي جزء من النص الأصلي، أو إعادة صياغة أي جملة سليمة بأسلوب مختلف. لو النص المستخرج مطابق تماماً لما في الصورة، أعده كما هو دون أي تغيير.
+صحّح فقط أخطاء الاستخراج (رقم أو كلمة أو حرف غلط عن الصورة). ممنوع منعاً باتاً: إضافة أي معلومة غير موجودة بالصورة، حذف أي جزء من النص الأصلي، أو إعادة صياغة أي جملة سليمة بأسلوب مختلف.
+النص قد يحتوي على علامات "[HEADING] " في أول بعض الأسطر (تشير إلى عناوين بصرية بارزة اكتُشفت مسبقًا) — حافظ عليها بالضبط كما هي في مكانها، لا تحذفها ولا تضف علامات جديدة ولا تنقلها لسطر آخر، فهي ليست جزءًا من نص الصورة نفسه بل علامة تنظيمية مضافة مسبقًا.
+لو النص المستخرج مطابق تماماً لما في الصورة، أعده كما هو دون أي تغيير.
 أعد النص الكامل بعد المراجعة فقط، بدون أي تعليق أو شرح أو مقدمة.
 
 النص المستخرج المطلوب مراجعته:
@@ -148,13 +159,18 @@ function sanitizeQAContent(raw, unitLabel) {
     if (!q || typeof q !== 'object') { warnings.push(`mcq[${i}] ليس object صالحًا`); return null; }
     const question = asText(q.question, ['question', 'text']);
     let choices = Array.isArray(q.choices) ? q.choices.map(c => asText(c)) : [];
-    if (choices.length !== 4) {
-      warnings.push(`mcq[${i}] عدد خياراته ${choices.length} وليس 4`);
-      while (choices.length < 4) choices.push('(خيار مفقود)');
+    // عدد الخيارات مسموح يتراوح بين 2 و4 (زي الامتحانات الحقيقية بالظبط —
+    // مش كل سؤال لازم يبقى له 4 اختيارات)، لكن أقل من 2 أو أكتر من 4 غير منطقي.
+    if (choices.length < 2) {
+      warnings.push(`mcq[${i}] عدد خياراته ${choices.length} أقل من 2`);
+      while (choices.length < 2) choices.push('(خيار مفقود)');
+    }
+    if (choices.length > 4) {
+      warnings.push(`mcq[${i}] عدد خياراته ${choices.length} أكتر من 4`);
       choices = choices.slice(0, 4);
     }
     let correctIndex = Number.isInteger(q.correct_index) ? q.correct_index : parseInt(q.correct_index, 10);
-    if (!Number.isInteger(correctIndex) || correctIndex < 0 || correctIndex > 3) {
+    if (!Number.isInteger(correctIndex) || correctIndex < 0 || correctIndex >= choices.length) {
       warnings.push(`mcq[${i}] correct_index غير صالح (${q.correct_index}) — تم ضبطه على 0`);
       correctIndex = 0;
     }
@@ -167,16 +183,27 @@ function sanitizeQAContent(raw, unitLabel) {
     return t;
   }).filter(t => t.trim());
 
+  const tf = (Array.isArray(raw.tf) ? raw.tf : []).map((q, i) => {
+    if (!q || typeof q !== 'object') { warnings.push(`tf[${i}] ليس object صالحًا`); return null; }
+    const statement = asText(q.statement, ['statement', 'question', 'text']);
+    if (!statement.trim()) { warnings.push(`tf[${i}] بدون نص عبارة`); return null; }
+    let answer;
+    if (typeof q.answer === 'boolean') answer = q.answer;
+    else if (typeof q.answer === 'string') answer = /^(true|صح|صحيح|1)$/i.test(q.answer.trim());
+    else { warnings.push(`tf[${i}] قيمة answer غير صالحة (${q.answer}) — تم ضبطها على false`); answer = false; }
+    return { statement, answer };
+  }).filter(Boolean);
+
   if (warnings.length) {
     console.warn(`  ⚠️  تعقيم بيانات في "${unitLabel}": ${warnings.join(' | ')}`);
   }
 
-  return { explanation, mcq, essay, hadWarnings: warnings.length > 0 };
+  return { explanation, mcq, essay, tf, hadWarnings: warnings.length > 0 };
 }
 
 const wordCountText = { short: 'حوالي 150 كلمة', medium: 'حوالي 300 كلمة', long: 'حوالي 450 كلمة' };
 
-async function callGeminiForUnit(unit, apiKey, model, wcOption, mcqCount, essayCount, siblingContext) {
+async function callGeminiForUnit(unit, apiKey, model, wcOption, mcqCount, essayCount, tfCount, siblingContext) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const pathLabel = unit.pathLabel || unit.title;
   siblingContext = siblingContext || {};
@@ -205,17 +232,37 @@ ${unit.text}
 """
 
 المطلوب أولاً — الشرح:
-اكتب شرحًا أكاديميًا واضحًا بالعربية الفصحى السهلة (${wordCountText[wcOption]})، يعيد صياغة الأفكار القانونية بأسلوب مبسط ومنظم (قدّم التعريفات أولاً، ثم الشروط أو الأركان، ثم الأمثلة أو التطبيقات إن وردت)، بدون الإخلال بالدقة القانونية، وبدون إضافة معلومات من خارج النص المعطى. انسخ أي رقم (رقم مادة، تاريخ، نسبة) كما ورد بالنص الأصلي حرفيًا دون تقريب أو تخمين.
+اكتب شرحًا أكاديميًا واضحًا بالعربية الفصحى السهلة (${wordCountText[wcOption]})، بدون الإخلال بالدقة القانونية، وبدون إضافة معلومات من خارج النص المعطى. انسخ أي رقم (رقم مادة، تاريخ، نسبة) كما ورد بالنص الأصلي حرفيًا دون تقريب أو تخمين.
+
+قواعد إلزامية لصياغة الشرح:
+- **أعد بناء الشرح من الصفر بترتيب وصياغة مختلفين تمامًا عن النص الأصلي** — ممنوع إعادة استخدام نفس الجمل أو نفس ترتيب الأفكار حرفيًا حتى لو بكلمات مرادفة قليلاً؛ اكتبه كأنك بتشرحه لطالب من فهمك أنت للفكرة، مش بتلخّص الفقرة.
+- **لو النص الأصلي منظّم بتعداد واضح** (شروط أو خصائص أو أقسام مرقّمة بأ/ب/ج أو أولاً/ثانياً/ثالثاً أو أرقام)، **حافظ على نفس بنية التعداد** في الشرح (نقطة مستقلة لكل عنصر على سطر جديد) بدل ما تذوّبها في فقرة نثرية متصلة — التعداد ده بنية مفيدة للمذاكرة مش مجرد أسلوب كتابة.
+- قدّم التعريفات أولاً، ثم الشروط أو الأركان، ثم الأمثلة أو التطبيقات إن وردت في النص الأصلي (لا تخترع أمثلة غير موجودة).
+- اكتب الشرح بالعربية فقط، حتى لو ورد في النص الأصلي مصطلح أجنبي (فرنسي أو إنجليزي أو لاتيني) جنب المقابل العربي — لا تُدرج المصطلح الأجنبي في الشرح إطلاقًا، اكتفِ بالمصطلح العربي فقط.
+
+ملاحظات توضيح عامية ("خد بالك"):
+بعد أي جملة أو نقطة أكاديمية فيها مصطلح مركّب، أو شرط/استثناء سهل الالتباس (زي الفرق بين "يجوز" و"يجب")، أو فكرة مجردة محتاجة تقريب، **زوّد سطرًا مستقلاً بعدها مباشرة** بالصيغة الحرفية التالية بالظبط:
+💡 خد بالك: [توضيح مبسط بالعامية المصرية للفكرة اللي فاتت، بأسلوب قريب وودود، من غير ما تضيف معلومة قانونية جديدة مش موجودة في الجملة الأكاديمية نفسها]
+لا تحط ملاحظة "خد بالك" بعد كل جملة — بس عند النقط اللي فعلاً محتاجة تبسيط، وسيب باقي الشرح من غيرها. ممنوع خلط العامية جوه الجملة الأكاديمية نفسها؛ العامية تكون بس في سطر "💡 خد بالك" المستقل ده.
 
 المطلوب ثانياً — أسئلة الاختيار من متعدد (بالضبط ${mcqCount} أسئلة):
+عدد الخيارات لكل سؤال **مش لازم يكون 4 دايمًا** — استخدم 2 أو 3 أو 4 خيارات حسب طبيعة السؤال نفسه (بالظبط زي الامتحانات الحقيقية): سؤال بديهي بين احتمالين يكفيه خياران، سؤال فيه بديل ثالث منطقي زوّده لثلاثة، وسؤال محتاج تمييز دقيق بين عدة مفاهيم استخدم أربعة.
+
 وزّع الأسئلة على القوالب الآتية حسب ما يناسب مضمون هذا الجزء تحديدًا (لا تستخدم قالبًا لا ينطبق على النص، ولا يلزم استخدام كل قالب):
-- تعريف: يختبر التعريف اللغوي أو الاصطلاحي لمصطلح ورد في النص.
+- تعريف: يختبر التعريف اللغوي أو الاصطلاحي لمصطلح ورد في النص، أو استكمال تعريف ناقص ("... هو كل عمل مبتكر أدبي أو فني...").
 - تفرقة: يختبر الفرق بين مفهومين متقاربين وردا في النص أو يمكن استنتاجهما منه.
-- استثناء/نفي: بصيغة "أيهما ليس من..." أو "كل ما يأتي يُعد كذا إلا...".
-- تطبيق قصير: يعرض حالة واقعية مصغرة (سطر أو سطرين) ويسأل عن الحكم الصحيح بناءً عليها.
+- شرط/استثناء دقيق: يختبر حكمًا شرطيًا بصيغة دقيقة زي "يجوز/لا يجوز"، "يشترط/لا يشترط"، "يلزم/لا يلزم" — بحيث يوقع الطالب اللي فاهم الفكرة نص فهم في الفخ، بنفس الدقة اللي بتتاخد بيها أسئلة الصح والخطأ في الامتحانات الحقيقية (استلهم الدقة من صياغات زي "لا يشترط إذن كتابي من المؤلف للقيام بالتحوير" كنموذج للمستوى المطلوب من الدقة، مش كنص تنسخه).
+- قصة قانونية قصيرة (حالة افتراضية): اعرض سيناريو واقعي قصير (2-4 أسطر) بأسماء أشخاص افتراضية، ثم اسأل عن الحكم القانوني الصحيح بناءً عليه — ممكن يتبعه سؤال فرعي تاني مبني على نفس القصة (زي "وفقاً للنقطة السابقة، ما المحكمة المختصة؟").
 - الرأي الراجح: يختبر أي الآراء أو المذاهب هو الراجح أو المعتمد، إن ورد ترجيح صريح في النص.
 - موقف القانون/القضاء المصري: إن ورد في النص إشارة لموقف المشرّع المصري أو القضاء تحديدًا، اسأل عنه.
-الخيارات الأربعة يجب أن تكون كلها معقولة ومتقاربة في الصياغة (تجنّب الخيارات الساذجة أو الواضح خطؤها)، بحيث يحتاج الطالب فعلاً للفهم لا للتخمين.
+
+خيارات كل سؤال يجب أن تكون كلها معقولة ومتقاربة في الصياغة (تجنّب الخيارات الساذجة أو الواضح خطؤها)، بحيث يحتاج الطالب فعلاً للفهم لا للتخمين.
+
+**قاعدة مهمة بخصوص الأرقام (طبّقها في الاختيار من متعدد والمقالي معًا)**:
+فرّق بين نوعين من الأرقام:
+- **رقم استشهاد** (رقم مادة قانونية، رقم قانون، رقم فقرة) — **قلّل الأسئلة اللي محورها الأساسي حفظ الرقم ده لأقصى درجة**؛ ده نادرًا جدًا ما يُسأل عنه مباشرة في الامتحانات الحقيقية. لو احتجت تذكره، اذكره كجزء من سياق السؤال مش كموضوعه ("نصت المادة على كذا... فما الحكم؟" — السؤال عن الحكم مش عن رقم المادة).
+- **رقم حكم قانوني جوهري** (مدة تقادم، مدة حماية، نصاب، نسبة، مهلة قانونية) — ده **رقم من صلب المادة العلمية** ويُسأل عنه بشكل طبيعي زي أي فكرة تانية، لأنه هو نفسه الحكم القانوني المطلوب حفظه وفهمه (زي "تنقضي الحقوق المالية بعد 50 سنة من الوفاة" — ده مش تفصيل هامشي، ده صلب الحكم).
+لو مش متأكد رقم معين من أنهي نوع، اعتبره "رقم استشهاد" وقلل الاعتماد عليه.
 
 المطلوب ثالثاً — الأسئلة المقالية (بالضبط ${essayCount} أسئلة):
 اكتب الأسئلة بنفس الصياغة والأسلوب المعتمد فعليًا في امتحانات نهاية العام بكليات الحقوق المصرية — وليس بصياغة عامة أو مبسطة. وزّع الأسئلة على القوالب الآتية حسب ما يناسب مضمون هذا الجزء تحديدًا (لا تستخدم قالبًا لا ينطبق على النص، ولا يلزم استخدام كل قالب):
@@ -240,15 +287,28 @@ ${unit.text}
 - لا تخترع حالات افتراضية أو تفاصيل قانونية غير مدعومة بمضمون النص المعطى.
 - كل سؤال يجب أن يكون قابلاً للإجابة بالاعتماد على محتوى هذا الجزء فقط.
 
+المطلوب رابعاً — أسئلة الصح والخطأ (بالضبط ${tfCount} أسئلة):
+اكتب عبارات قصيرة ودقيقة (سطر واحد لكل عبارة)، نصفها تقريبًا صحيح ونصفها الآخر خطأ (وزّع الصح والخطأ بشكل غير متوقع، مش نمط ثابت زي "كل الأزواج صح")، بنفس الدقة الشديدة المعتمدة في امتحانات كليات الحقوق المصرية الفعلية. القوالب:
+- عبارة تختبر حكمًا شرطيًا دقيقًا بصيغة "يجوز/لا يجوز"، "يشترط/لا يشترط"، "يجب/لا يجب" — الفخ المطلوب هو دقة الصياغة نفسها (زي "لا يشترط إذن كتابي من المؤلف للقيام بالتحوير") مش الفكرة العامة.
+- عبارة تختبر تعريفًا (صحيحًا أو محرَّفًا بتغيير كلمة جوهرية فيه).
+- عبارة تنسب حكمًا أو استثناءً لطرف غلط (مثلاً تخلط بين حكمين متقابلين، أو تعمم استثناء على غير محله).
+- عبارة تختبر ترتيبًا زمنيًا أو منطقيًا لخطوة إجرائية.
+كل عبارة يجب أن تكون قابلة للحكم عليها (صح أو خطأ) بشكل قاطع بالاعتماد على محتوى هذا الجزء وحده فقط، من غير أي التباس أو احتمال لتفسيرين مختلفين. لا تكرر نفس الفكرة في أكتر من عبارة.
+
 أعد النتيجة بصيغة JSON فقط، بدون أي نص أو علامات إضافية قبله أو بعده، وبدون أي إشارة داخل نص الأسئلة نفسها لكونها مأخوذة من "النص" أو "المقطع" (صُغ كل سؤال كسؤال أكاديمي مستقل تمامًا)، بالشكل التالي بالضبط:
 {
   "explanation": "الشرح الكامل هنا",
   "mcq": [
-    {"question": "نص السؤال", "choices": ["اختيار 1", "اختيار 2", "اختيار 3", "اختيار 4"], "correct_index": 0}
+    {"question": "نص سؤال بأربعة اختيارات", "choices": ["اختيار 1", "اختيار 2", "اختيار 3", "اختيار 4"], "correct_index": 0},
+    {"question": "نص سؤال باختيارين بس (مثلاً بين حكمين متقابلين)", "choices": ["اختيار 1", "اختيار 2"], "correct_index": 1}
   ],
-  "essay": ["سؤال مقالي تحليلي أول", "سؤال مقالي تحليلي ثانٍ"]
+  "essay": ["سؤال مقالي تحليلي أول", "سؤال مقالي تحليلي ثانٍ"],
+  "tf": [
+    {"statement": "عبارة قانونية دقيقة قابلة للحكم عليها", "answer": true},
+    {"statement": "عبارة قانونية أخرى محرَّفة عمدًا في نقطة دقيقة", "answer": false}
+  ]
 }
-يجب أن يحتوي "mcq" على ${mcqCount} عنصر بالضبط، و"essay" على ${essayCount} عنصر بالضبط.`;
+عدد عناصر "choices" في كل سؤال مستقل بذاته (2 أو 3 أو 4 حسب طبيعة السؤال — راجع القواعد أعلاه)، والمثال هنا لتوضيح الشكل العام فقط. يجب أن يحتوي "mcq" على ${mcqCount} عنصر بالضبط، و"essay" على ${essayCount} عنصر بالضبط، و"tf" على ${tfCount} عنصر بالضبط.`;
 
   const body = { contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.4, responseMimeType: 'application/json' } };
   const data = await geminiFetch(url, body);
@@ -266,15 +326,16 @@ ${unit.text}
  * غير صحيح فعليًا، أو أي سؤال مقالي غير قابل للإجابة من هذا الجزء وحده.
  * يرجع { result, changed, notes } — notes تلخيص مختصر لما تم تصحيحه (أو فارغة).
  */
-async function callGeminiVerifyContent(unit, generated, apiKey, model, mcqCount, essayCount) {
+async function callGeminiVerifyContent(unit, generated, apiKey, model, mcqCount, essayCount, tfCount) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const pathLabel = unit.pathLabel || unit.title;
-  const prompt = `أنت مدقق أكاديمي صارم متخصص في القانون. مهمتك مراجعة محتوى (شرح + أسئلة) تم توليده اعتمادًا على نص أصلي واحد فقط، والتحقق من أربعة أمور بدقة:
+  const prompt = `أنت مدقق أكاديمي صارم متخصص في القانون. مهمتك مراجعة محتوى (شرح + أسئلة) تم توليده اعتمادًا على نص أصلي واحد فقط، والتحقق من خمسة أمور بدقة:
 
 ١) عدم التأليف: هل يوجد في الشرح أو الأسئلة أي معلومة، مثال، أو تفصيل قانوني غير موجود إطلاقًا في النص الأصلي (سواء من معرفة عامة عن القانون أو استنتاج غير مباشر)؟
-٢) دقة الأرقام: هل كل رقم مادة قانونية، تاريخ، نسبة، أو رقم ترتيبي ورد في الشرح أو الأسئلة مطابق حرفيًا لما ورد في النص الأصلي؟
-٣) صحة إجابات الاختيار من متعدد: لكل سؤال MCQ، تحقق فعليًا بالرجوع للنص الأصلي أن "correct_index" هو فعلاً الإجابة الصحيحة، وليس افتراضًا.
+٢) دقة الأرقام الجوهرية: هل كل رقم يمثل حكمًا قانونيًا جوهريًا (مدة تقادم أو حماية، نصاب، نسبة، مهلة) ورد في الشرح أو الأسئلة مطابق حرفيًا لما ورد في النص الأصلي؟ (أرقام الاستشهاد المجردة زي رقم مادة أو رقم قانون أقل أهمية، فلو مش موجودة أو مش دقيقة ومفيش سؤال محوره الأساسي حفظها تحديدًا، متعتبرهاش خطأ يستأهل تصحيح).
+٣) صحة إجابات الاختيار من متعدد: لكل سؤال MCQ (بغض النظر عن عدد خياراته — 2 أو 3 أو 4، مش لازم يبقوا 4 دايمًا)، تحقق فعليًا بالرجوع للنص الأصلي أن "correct_index" هو فعلاً الإجابة الصحيحة، وليس افتراضًا.
 ٤) قابلية الإجابة: هل كل سؤال مقالي يمكن الإجابة عليه فعلاً بالاعتماد على محتوى النص الأصلي المعطى وحده؟
+٥) صحة أسئلة الصح والخطأ: لكل عبارة في "tf"، تحقق فعليًا بالرجوع للنص الأصلي أن قيمة "answer" (true أو false) مطابقة فعلاً لما تقوله العبارة، وأن العبارة نفسها قابلة للحكم عليها بشكل قاطع من غير التباس.
 
 عنوان الجزء: "${pathLabel}"
 النص الأصلي (المرجع الوحيد للتحقق):
@@ -283,16 +344,16 @@ ${unit.text}
 """
 
 المحتوى المطلوب تدقيقه (JSON):
-${JSON.stringify({ explanation: generated.explanation, mcq: generated.mcq, essay: generated.essay })}
+${JSON.stringify({ explanation: generated.explanation, mcq: generated.mcq, essay: generated.essay, tf: generated.tf })}
 
 التعليمات:
-- إن كان كل شيء سليمًا تمامًا، أعد نفس المحتوى دون أي تغيير.
-- إن وجدت أي خطأ من الأنواع الأربعة أعلاه، صححه مباشرة: احذف/عدّل الجزء الخاطئ من الشرح، أو صحح الرقم الخاطئ ليطابق النص الأصلي، أو صحح "correct_index"، أو استبدل السؤال المقالي غير القابل للإجابة بسؤال بديل مبني على النص الأصلي فقط ويتبع نفس أسلوب امتحانات كليات الحقوق (عرّف/اذكر/بيّن/ناقش/قارن).
-- حافظ دائمًا على وجود ${mcqCount} عنصر بالضبط في "mcq" و${essayCount} عنصر بالضبط في "essay" حتى بعد أي تصحيح.
-- أضف حقل "verification_notes": مصفوفة نصية قصيرة (سطر واحد لكل ملاحظة) تلخص أي تصحيح فعلي تم إجراؤه (رقم، معلومة، إجابة MCQ، سؤال). لو ملحوظش أي خطأ اتركها مصفوفة فارغة [].
+- إن كان كل شيء سليمًا تمامًا، أعد نفس المحتوى دون أي تغيير — بما في ذلك عدد خيارات كل سؤال MCQ زي ما هو، لا تضيف أو تحذف خيارات لمجرد توحيد العدد.
+- إن وجدت أي خطأ من الأنواع الخمسة أعلاه، صححه مباشرة: احذف/عدّل الجزء الخاطئ من الشرح، أو صحح الرقم الجوهري الخاطئ ليطابق النص الأصلي، أو صحح "correct_index"، أو استبدل السؤال المقالي غير القابل للإجابة بسؤال بديل مبني على النص الأصلي فقط ويتبع نفس أسلوب امتحانات كليات الحقوق (عرّف/اذكر/بيّن/ناقش/قارن)، أو صحح "answer" الخاطئة في أسئلة الصح والخطأ، أو استبدل عبارة صح/خطأ ملتبسة بعبارة بديلة قاطعة الحكم مبنية على النص الأصلي فقط.
+- حافظ دائمًا على وجود ${mcqCount} عنصر بالضبط في "mcq" و${essayCount} عنصر بالضبط في "essay" و${tfCount} عنصر بالضبط في "tf" حتى بعد أي تصحيح.
+- أضف حقل "verification_notes": مصفوفة نصية قصيرة (سطر واحد لكل ملاحظة) تلخص أي تصحيح فعلي تم إجراؤه (رقم جوهري، معلومة، إجابة MCQ، سؤال، إجابة صح/خطأ). لو ملحوظش أي خطأ اتركها مصفوفة فارغة [].
 
-أعد النتيجة بصيغة JSON فقط بنفس البنية بالضبط:
-{"explanation":"...","mcq":[{"question":"...","choices":["...","...","...","..."],"correct_index":0}],"essay":["...","..."],"verification_notes":[]}`;
+أعد النتيجة بصيغة JSON فقط بنفس البنية بالضبط (عدد الخيارات داخل "choices" حسب كل سؤال، مش ثابت):
+{"explanation":"...","mcq":[{"question":"...","choices":["...","..."],"correct_index":0}],"essay":["...","..."],"tf":[{"statement":"...","answer":true}],"verification_notes":[]}`;
 
   const body = { contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0, responseMimeType: 'application/json' } };
   const data = await geminiFetch(url, body);
@@ -307,17 +368,20 @@ ${JSON.stringify({ explanation: generated.explanation, mcq: generated.mcq, essay
     {
       explanation: parsed.explanation ?? generated.explanation,
       mcq: (Array.isArray(parsed.mcq) && parsed.mcq.length) ? parsed.mcq : generated.mcq,
-      essay: (Array.isArray(parsed.essay) && parsed.essay.length) ? parsed.essay : generated.essay
+      essay: (Array.isArray(parsed.essay) && parsed.essay.length) ? parsed.essay : generated.essay,
+      tf: (Array.isArray(parsed.tf) && parsed.tf.length) ? parsed.tf : generated.tf
     },
     pathLabel
   );
-  const result = { explanation: sanitized.explanation, mcq: sanitized.mcq, essay: sanitized.essay };
+  const result = { explanation: sanitized.explanation, mcq: sanitized.mcq, essay: sanitized.essay, tf: sanitized.tf };
   return { result, changed: notes.length > 0, notes };
 }
 
 /* ================= تحليل الهيكل الهرمي (بدون AI) ================= */
 
-const ordinalPattern = '(?:الأول|الثاني|الثالث|الرابع|الخامس|السادس|السابع|الثامن|التاسع|العاشر|الحادي عشر|الثاني عشر|الثالث عشر|الرابع عشر|الخامس عشر|السادس عشر|السابع عشر|الثامن عشر|التاسع عشر|العشرون)';
+// ملحوظة: "الثاني"/"الحادي" ليهم تهجئتان شائعتان في الكتب العربية القديمة —
+// بالياء (ي) أو بالألف المقصورة (ى، زي "الثانى" و"الحادى") — الاثنان مقبولان هنا.
+const ordinalPattern = '(?:الأول|الثان[يى]|الثالث|الرابع|الخامس|السادس|السابع|الثامن|التاسع|العاشر|الحاد[يى] عشر|الثان[يى] عشر|الثالث عشر|الرابع عشر|الخامس عشر|السادس عشر|السابع عشر|الثامن عشر|التاسع عشر|العشرون)';
 const levelDefs = [
   { key: 'section', label: 'القسم', arName: 'قسم' },
   { key: 'part', label: 'الباب', arName: 'باب' },
@@ -341,6 +405,23 @@ function matchHeading(t) {
   return null;
 }
 
+// عناوين خاصة ثابتة المستوى: بتظهر في نفس صف "الباب" في فهرس الكتاب غالبًا
+// (تمهيد، مقدمة، فصل تمهيدي، باب تمهيدي) لكن من غير ترقيم "الأول/الثاني".
+// نديها نفس مستوى "الباب" (index 1 في levelDefs) عشان تبقى بند مستقل موازي للأبواب.
+const SPECIAL_TOP_LEVEL_INDEX = 1;
+const specialTopLevelRegex = /^(تمهيد|مقدمة|فصل تمهيدي|باب تمهيدي)\s*(?:[:：\-–—]\s*(\S.*))?$/;
+
+// عناوين بصيغة "أولاً/ثانياً/ثالثاً..." — شائعة كتقسيم فرعي غير مسمى داخل فصل
+// أو مبحث، من غير كلمة "فصل" أو "مبحث" قبلها. مستواها نسبي: أعمق بواحد من
+// آخر عنوان معروف قبلها (مش مستوى ثابت مطلق زي باقي الأنماط).
+const wordOrdinalRegex = /^(أولاً|أولا|ثانياً|ثانيا|ثالثاً|ثالثا|رابعاً|رابعا|خامساً|خامسا|سادساً|سادسا|سابعاً|سابعا|ثامناً|ثامنا|تاسعاً|تاسعا|عاشراً|عاشرا)\s*(?:[:：\-–—]\s*(\S.*))?$/;
+
+// علامة عنوان بصري (خط عريض/حجم أكبر) اكتُشفت في مرحلة الاستخراج (OCR) ومحطوطة
+// في أول السطر — بتغطي عناوين مالهاش أي كلمة مفتاحية أو ترقيم معروف خالص.
+// مستواها نسبي زي "أولاً/ثانياً" بالظبط.
+const ocrHeadingMarkerRegex = /^\[HEADING\]\s*(.*)$/;
+function stripHeadingMarker(t) { return t.replace(/^\[HEADING\]\s*/, ''); }
+
 function cleanLines(text) {
   return text.split(/\r?\n/).filter(line => {
     const t = line.trim();
@@ -351,8 +432,17 @@ function cleanLines(text) {
 }
 function isTocMarker(t) { return t === 'فهرس الموضوعات' || t === 'قائمة المراجع' || t === 'رقم الصفحة' || t === 'الموضوع'; }
 function isDotLeaderLine(t) { return /\.{2,}\s*\d+\s*$/.test(t) || /^\d+\s*\.{2,}/.test(t); }
+function isAnyHeadingLine(raw) {
+  const ocrMarked = /^\[HEADING\]\s*/.test(raw);
+  const t = stripHeadingMarker(raw);
+  if (ocrMarked) return true;
+  if (matchHeading(t)) return true;
+  if (specialTopLevelRegex.test(t)) return true;
+  if (wordOrdinalRegex.test(t)) return true;
+  return false;
+}
 
-function parseBook(rawText) {
+function detectHeadingMatches(rawText) {
   const lines = cleanLines(rawText);
   const n = lines.length;
   const excluded = new Array(n).fill(false);
@@ -377,7 +467,7 @@ function parseBook(rawText) {
         let back = z - 1, steps = 0;
         while (back >= 0 && steps < 8) {
           const t = lines[back].trim();
-          const isHeadingLine = matchHeading(t) !== null;
+          const isHeadingLine = isAnyHeadingLine(t);
           if (t === '' || isHeadingLine) { excluded[back] = true; back--; steps++; }
           else break;
         }
@@ -386,29 +476,65 @@ function parseBook(rawText) {
   }
 
   let matches = [];
+  // آخر مستوى عنوان "مطلق" (كلمة مفتاحية أو نوع خاص ثابت) — العناوين النسبية
+  // (أولاً/ثانياً، والعنوان البصري) بتُبنى دايمًا على أساسه هو، مش على أساس
+  // بعضها البعض، عشان "أولاً" و"ثانياً" و"ثالثاً" المتتالية تفضل إخوة على نفس
+  // المستوى مش متداخلة جوه بعض.
+  let lastAbsoluteLevel = null;
   for (let idx = 0; idx < n; idx++) {
     if (excluded[idx]) continue;
-    const t = lines[idx].trim();
+    const raw = lines[idx].trim();
+    if (!raw) continue;
+    const ocrMarked = /^\[HEADING\]\s*/.test(raw);
+    const t = stripHeadingMarker(raw);
     if (!t) continue;
+
+    // 1) كلمة مفتاحية + ترقيم (باب/فصل/مبحث/مطلب) — الأعلى موثوقية، مستوى ثابت مطلق
     const hm = matchHeading(t);
-    if (hm) matches.push({ level: hm.level, lineIdx: idx, inlineTitle: hm.inlineTitle });
+    if (hm) { matches.push({ level: hm.level, lineIdx: idx, inlineTitle: hm.inlineTitle, kind: 'keyword' }); lastAbsoluteLevel = hm.level; continue; }
+
+    // 2) عنوان خاص ثابت (تمهيد/مقدمة/فصل تمهيدي) — بنفس مستوى "الباب"، والعنوان
+    // معروف من كلمة المطابقة نفسها (مفيش سطر عنوان منفصل بعده زي باقي الأنماط).
+    const sm = t.match(specialTopLevelRegex);
+    if (sm) { matches.push({ level: SPECIAL_TOP_LEVEL_INDEX, lineIdx: idx, inlineTitle: sm[2] ? sm[2].trim() : sm[1], kind: 'special' }); lastAbsoluteLevel = SPECIAL_TOP_LEVEL_INDEX; continue; }
+
+    // 3) عنوان "أولاً/ثانياً..." — نسبي: أعمق بواحد من آخر عنوان مطلق (مش من
+    // بعضها البعض)، فتفضل كل العناوين المتتالية من النوع ده إخوة على نفس المستوى.
+    // مستواه "غامض" ومرشّح لمرحلة التصنيف الذكي لاحقًا لو مفعّلة.
+    const wm = t.match(wordOrdinalRegex);
+    if (wm) {
+      const lvl = (lastAbsoluteLevel === null ? 4 : lastAbsoluteLevel + 1);
+      matches.push({ level: lvl, lineIdx: idx, inlineTitle: wm[2] ? wm[2].trim() : wm[1], kind: 'wordOrdinal' });
+      continue;
+    }
+
+    // 4) عنوان بصري مكتشف وقت الاستخراج (علامة [HEADING])، بدون أي نمط نصي معروف — نسبي بنفس منطق (3)، وغامض أيضًا.
+    if (ocrMarked) {
+      const lvl = (lastAbsoluteLevel === null ? 4 : lastAbsoluteLevel + 1);
+      matches.push({ level: lvl, lineIdx: idx, inlineTitle: t || '(عنوان بصري)', kind: 'ocrMarked' });
+      continue;
+    }
   }
   matches.forEach((h, i) => {
     if (h.inlineTitle) { h.title = h.inlineTitle; h.titleLineIdx = h.lineIdx; return; }
     let j = h.lineIdx + 1;
     while (j < n && (excluded[j] || !lines[j].trim())) j++;
     const nextHeadingLine = (i + 1 < matches.length) ? matches[i + 1].lineIdx : n;
-    if (j < nextHeadingLine) { h.title = lines[j].trim(); h.titleLineIdx = j; }
+    if (j < nextHeadingLine) { h.title = stripHeadingMarker(lines[j].trim()); h.titleLineIdx = j; }
     else { h.title = '(بدون عنوان)'; }
   });
   matches.forEach((h, i) => {
     const startLine = (h.titleLineIdx !== undefined ? h.titleLineIdx : h.lineIdx) + 1;
     const endLine = (i + 1 < matches.length) ? matches[i + 1].lineIdx : n;
     const chunk = [];
-    for (let k = startLine; k < endLine; k++) { if (!excluded[k]) chunk.push(lines[k]); }
+    for (let k = startLine; k < endLine; k++) { if (!excluded[k]) chunk.push(stripHeadingMarker(lines[k])); }
     h.content = chunk.join('\n').trim();
   });
 
+  return { lines, excluded, matches, n };
+}
+
+function buildTreeFromMatches(matches) {
   const root = { level: -1, title: 'root', content: '', children: [] };
   const stack = [root];
   matches.forEach(h => {
@@ -436,9 +562,75 @@ function parseBook(rawText) {
   }
   collect(root, []);
 
-  const stats = { section: 0, part: 0, chapter: 0, topic: 0, subtopic: 0 };
-  matches.forEach(h => { stats[levelDefs[h.level].key]++; });
+  const stats = { section: 0, part: 0, chapter: 0, topic: 0, subtopic: 0, other: 0 };
+  matches.forEach(h => {
+    const def = levelDefs[h.level];
+    if (def) stats[def.key]++; else stats.other++;
+  });
 
+  return { root, leaves, stats };
+}
+
+/**
+ * مرحلة تصنيف ذكي (اختيارية): بترجع لـ Gemini قائمة كل العناوين المكتشفة في
+ * الكتاب كله بالترتيب (نص العناوين بس، مش المحتوى — استدعاء واحد رخيص جدًا
+ * لكل كتاب)، وتسأله يصحح مستوى العناوين "الغامضة" فقط (أولاً/ثانياً، أو
+ * العنوان البصري) بناءً على فهمه للسياق الكامل، بينما العناوين "المؤكدة"
+ * (باب/فصل/مبحث بكلمة صريحة) بتفضل زي ما هي كمرجع ثابت لا يتغيّر.
+ */
+async function callGeminiReclassifyHeadings(matches, apiKey, model) {
+  const ambiguousCount = matches.filter(h => h.kind === 'wordOrdinal' || h.kind === 'ocrMarked').length;
+  if (ambiguousCount === 0) return { matches, changed: 0 };
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const outlineLines = matches.map((h, i) => {
+    const status = (h.kind === 'wordOrdinal' || h.kind === 'ocrMarked') ? 'غامض' : 'مؤكد';
+    return `[${i}] (${status}, مستوى حالي: ${h.level}) ${h.title}`;
+  }).join('\n');
+
+  const prompt = `أنت خبير في تحليل الهياكل الهرمية لكتب القانون. معك قائمة مرتبة بكل عناوين كتاب واحد بالترتيب الفعلي كما وردت فيه.
+
+المقياس الرقمي للمستوى: 0=قسم، 1=باب، 2=فصل، 3=مبحث، 4=مطلب، وأي رقم أكبر من 4 يعني مستوى أعمق من مطلب (فرع داخل مطلب).
+
+كل عنوان معلّم بحالة:
+- "مؤكد": مستواه صحيح ومعروف بثقة تامة (من كلمة صريحة زي باب/فصل/مبحث/مطلب أو صيغة تمهيد/مقدمة معروفة) — مرجع ثابت، لا تغيّر مستواه إطلاقًا.
+- "غامض": مستواه الحالي مجرد تخمين أولي بسيط (عمق واحد أكبر من آخر عنوان مؤكد قبله) ومحتاج تصحيح فعلي منك بناءً على فهمك للسياق الكامل وترتيب الكتاب المنطقي.
+
+قائمة العناوين:
+${outlineLines}
+
+المطلوب: لكل عنوان "غامض" فقط، حدد المستوى الهرمي الصحيح (رقم صحيح) بناءً على موضعه بين العناوين المؤكدة المجاورة له وعلاقته المنطقية بالعناوين الغامضة القريبة منه (مثلاً لو "أولاً" و"ثانياً" و"ثالثاً" متتالية تحت نفس المبحث، الأرجح إنهم إخوة على نفس المستوى، إلا لو مضمون عناوينهم نفسه يوحي بخلاف ذلك). لو رأيت أن التخمين الأولي صحيح بالفعل، أعده بنفس الرقم. لا تُدرج أي عنوان "مؤكد" في ردك إطلاقًا.
+
+أعد النتيجة بصيغة JSON فقط: مصفوفة تشمل العناوين "الغامضة" فقط بهذا الشكل بالضبط:
+[{"index": 5, "level": 3}, {"index": 6, "level": 3}]`;
+
+  const body = { contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0, responseMimeType: 'application/json' } };
+  const data = await geminiFetch(url, body);
+  let text = data?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
+  text = text.trim().replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
+  let corrections;
+  try { corrections = JSON.parse(text); }
+  catch (e) { const err = new Error('تعذّر تفسير استجابة تصنيف العناوين كـ JSON'); err.status = -1; throw err; }
+  if (!Array.isArray(corrections)) { const err = new Error('استجابة تصنيف العناوين ليست مصفوفة'); err.status = -1; throw err; }
+
+  let changed = 0;
+  corrections.forEach(c => {
+    const idx = Number.isInteger(c.index) ? c.index : parseInt(c.index, 10);
+    const lvl = Number.isInteger(c.level) ? c.level : parseInt(c.level, 10);
+    if (!Number.isInteger(idx) || idx < 0 || idx >= matches.length) return;
+    const h = matches[idx];
+    if (h.kind !== 'wordOrdinal' && h.kind !== 'ocrMarked') return; // حماية إضافية: ممنوع تعديل عنوان مؤكد حتى لو النموذج حاول
+    if (!Number.isInteger(lvl) || lvl < 0) return;
+    if (lvl !== h.level) changed++;
+    h.level = lvl;
+  });
+
+  return { matches, changed };
+}
+
+function parseBook(rawText) {
+  const { lines, excluded, matches, n } = detectHeadingMatches(rawText);
+  const { root, leaves, stats } = buildTreeFromMatches(matches);
   return { root, leaves, stats };
 }
 
@@ -465,16 +657,31 @@ function escXml(s) {
 function paraXml(text, styleId, opts) {
   opts = opts || {};
   const bold = opts.bold ? '<w:b/>' : '';
+  const italic = opts.italic ? '<w:i/>' : '';
   const styleTag = styleId ? `<w:pStyle w:val="${styleId}"/>` : '';
   const jc = opts.center ? '<w:jc w:val="center"/>' : '<w:jc w:val="right"/>';
   const lines = String(text || '').split(/\n+/);
   const runs = lines.map((ln, i) => {
     const br = i > 0 ? '<w:br/>' : '';
-    return `<w:r><w:rPr><w:rtl/>${bold}</w:rPr>${br}<w:t xml:space="preserve">${escXml(ln)}</w:t></w:r>`;
+    return `<w:r><w:rPr><w:rtl/>${bold}${italic}</w:rPr>${br}<w:t xml:space="preserve">${escXml(ln)}</w:t></w:r>`;
   }).join('');
   return `<w:p><w:pPr><w:bidi/>${styleTag}${jc}</w:pPr>${runs}</w:p>`;
 }
 function pageBreakXml() { return `<w:p><w:r><w:br w:type="page"/></w:r></w:p>`; }
+
+/**
+ * يقسّم نص الشرح لفقرات مستقلة، ويميّز أي سطر توضيح عامي ("💡 خد بالك: ...")
+ * بخط مائل عن باقي الشرح الأكاديمي، عشان الفرق بين الاتنين يبقى واضح بصريًا
+ * في ملف Word (مش مجرد فرق في الأسلوب مدفون جوه نفس الفقرة).
+ */
+const KHOD_BALAK_REGEX = /^(?:💡\s*)?خد\s*بالك\s*[:：]/;
+function renderExplanation(explanation) {
+  const paragraphs = String(explanation || '').split(/\n+/).filter(p => p.trim());
+  return paragraphs.map(p => {
+    const isNote = KHOD_BALAK_REGEX.test(p.trim());
+    return paraXml(p.trim(), 'Normal', isNote ? { italic: true } : {});
+  }).join('');
+}
 
 function buildDocumentXmlBody(parsedBook, aiResults, titleName) {
   let body = '';
@@ -490,7 +697,7 @@ function buildDocumentXmlBody(parsedBook, aiResults, titleName) {
       if (node.children.length === 0) {
         const r = aiResults[node.unitId];
         if (r && !r.fail) {
-          if (r.explanation) body += paraXml(r.explanation, 'Normal');
+          if (r.explanation) body += renderExplanation(r.explanation);
           if (r.mcq && r.mcq.length) {
             body += paraXml('أسئلة اختيار من متعدد', 'Normal', { bold: true });
             const letters = ['أ', 'ب', 'ج', 'د'];
@@ -504,6 +711,13 @@ function buildDocumentXmlBody(parsedBook, aiResults, titleName) {
           if (r.essay && r.essay.length) {
             body += paraXml('أسئلة مقالية للمراجعة', 'Normal', { bold: true });
             r.essay.forEach((q, qi) => { body += paraXml(`${qi + 1}. ${q}`, 'Normal'); });
+          }
+          if (r.tf && r.tf.length) {
+            body += paraXml('أسئلة صح وخطأ', 'Normal', { bold: true });
+            r.tf.forEach((q, qi) => {
+              body += paraXml(`${qi + 1}. ${q.statement || ''}`, 'Normal');
+              body += paraXml(`   ✔ الإجابة الصحيحة: ${q.answer ? 'صح' : 'خطأ'}`, 'Normal', { bold: true });
+            });
           }
         } else if (r && r.fail) {
           body += paraXml(`[تعذّر توليد شرح هذا الجزء: ${r.note || ''}]`, 'Normal');
@@ -683,8 +897,36 @@ async function processOnePdf(pdfPath) {
   }
 
   console.log('🌳 جارٍ تحليل الهيكل الهرمي...');
-  const parsedBook = parseBook(fullText);
-  console.log(`   ${parsedBook.stats.section} قسم، ${parsedBook.stats.part} باب، ${parsedBook.stats.chapter} فصل، ${parsedBook.stats.topic} مبحث، ${parsedBook.leaves.length} جزء سيُشرح`);
+  const { lines: bookLines, excluded: bookExcluded, matches: headingMatches, n: bookLineCount } = detectHeadingMatches(fullText);
+  const ambiguousHeadingsCount = headingMatches.filter(h => h.kind === 'wordOrdinal' || h.kind === 'ocrMarked').length;
+
+  if (VERIFY_STRUCTURE && ambiguousHeadingsCount > 0) {
+    console.log(`   🔎 ${ambiguousHeadingsCount} عنوان غامض (أولاً/ثانياً أو مكتشف بصريًا) — جارٍ تصنيف مستواها الصحيح بناءً على سياق الكتاب الكامل...`);
+    let done = false, attempts = 0, rateLimitBackoffs = 0;
+    while (!done) {
+      if (keyIdx >= API_KEYS.length) { console.warn('   ⚠️ نفدت المفاتيح أثناء تصنيف الهيكل — سيُعتمد التخمين الأولي كما هو.'); done = true; break; }
+      try {
+        const { changed } = await callGeminiReclassifyHeadings(headingMatches, currentKey(), MODEL);
+        if (changed > 0) console.log(`   ✏️  تم تصحيح مستوى ${changed} عنوان غامض بعد مراجعة السياق الكامل`);
+        done = true;
+      } catch (err) {
+        if (isKeyExhaustedError(err.status, err.message)) { keyIdx++; attempts = 0; rateLimitBackoffs = 0; continue; }
+        if (err.status === 429) {
+          rateLimitBackoffs++;
+          if (rateLimitBackoffs > 6) { keyIdx++; rateLimitBackoffs = 0; continue; }
+          await sleep(Math.min(4000 * rateLimitBackoffs, 30000));
+        } else {
+          attempts++;
+          if (attempts >= 2) { console.warn(`   ⚠️ فشلت مراجعة تصنيف الهيكل (${err.message}) — سيُعتمد التخمين الأولي كما هو.`); done = true; }
+          else await sleep(1200);
+        }
+      }
+    }
+    await sleep(pacingMs());
+  }
+
+  const parsedBook = buildTreeFromMatches(headingMatches);
+  console.log(`   ${parsedBook.stats.section} قسم، ${parsedBook.stats.part} باب، ${parsedBook.stats.chapter} فصل، ${parsedBook.stats.topic} مبحث، ${parsedBook.stats.subtopic} مطلب، ${parsedBook.stats.other} عنوان نسبي/بصري (أولاً.. أو مكتشف بصريًا)، ${parsedBook.leaves.length} جزء سيُشرح`);
   if (parsedBook.leaves.length === 0) {
     console.warn('   ⚠️ لم يتم العثور على أي عناوين بصيغة "الباب الأول" ونحوها — تأكد من صيغة عناوين الكتاب.');
   }
@@ -712,11 +954,12 @@ async function processOnePdf(pdfPath) {
     while (!done) {
       if (keyIdx >= API_KEYS.length) throw new Error(`نفدت حدود كل المفاتيح عند الجزء ${i + 1}`);
       try {
-        const parsed = await callGeminiForUnit(unit, currentKey(), MODEL, WORD_COUNT_OPTION, MCQ_COUNT, ESSAY_COUNT, siblingContext);
+        const parsed = await callGeminiForUnit(unit, currentKey(), MODEL, WORD_COUNT_OPTION, MCQ_COUNT, ESSAY_COUNT, TF_COUNT, siblingContext);
         generated = {
           explanation: parsed.explanation || '',
           mcq: Array.isArray(parsed.mcq) ? parsed.mcq : [],
-          essay: Array.isArray(parsed.essay) ? parsed.essay : []
+          essay: Array.isArray(parsed.essay) ? parsed.essay : [],
+          tf: Array.isArray(parsed.tf) ? parsed.tf : []
         };
         done = true;
       } catch (err) {
@@ -727,7 +970,7 @@ async function processOnePdf(pdfPath) {
           await sleep(Math.min(4000 * rateLimitBackoffs, 30000));
         } else {
           attempts++;
-          if (attempts >= 2) { aiResults[unit.id] = { fail: true, note: err.message, explanation: '', mcq: [], essay: [] }; done = true; }
+          if (attempts >= 2) { aiResults[unit.id] = { fail: true, note: err.message, explanation: '', mcq: [], essay: [], tf: [] }; done = true; }
           else await sleep(1200);
         }
       }
@@ -741,7 +984,7 @@ async function processOnePdf(pdfPath) {
         while (!vDone) {
           if (keyIdx >= API_KEYS.length) { vDone = true; contentVerifyStats.failed++; break; }
           try {
-            const { result, changed, notes } = await callGeminiVerifyContent(unit, generated, currentKey(), MODEL, MCQ_COUNT, ESSAY_COUNT);
+            const { result, changed, notes } = await callGeminiVerifyContent(unit, generated, currentKey(), MODEL, MCQ_COUNT, ESSAY_COUNT, TF_COUNT);
             generated = result;
             contentVerifyStats.checked++;
             if (changed) {
@@ -821,6 +1064,8 @@ async function main() {
     process.exit(1);
   }
 
+  // اختيار كتاب واحد بس: لو اتحدد BOOK_FILENAME (اسم كامل أو جزء منه)، نعالج
+  // بس الملف/الملفات اللي بتطابقه. لو سيبته فاضي، نعالج كل الكتب زي المعتاد.
   const bookFilter = (process.env.BOOK_FILENAME || '').trim();
   if (bookFilter) {
     const filterLower = bookFilter.toLowerCase();
@@ -838,7 +1083,7 @@ async function main() {
     console.log(`📖 تم اختيار كتاب واحد فقط: "${pdfs[0]}"`);
   }
 
-  console.log(`النموذج: ${MODEL} | طول الشرح: ${WORD_COUNT_OPTION} | أسئلة اختيار: ${MCQ_COUNT} | أسئلة مقالية: ${ESSAY_COUNT}`);
+  console.log(`النموذج: ${MODEL} | طول الشرح: ${WORD_COUNT_OPTION} | أسئلة اختيار: ${MCQ_COUNT} | أسئلة مقالية: ${ESSAY_COUNT} | أسئلة صح وخطأ: ${TF_COUNT}`);
   console.log(`عدد ملفات PDF المطلوب معالجتها: ${pdfs.length}`);
 
   for (const pdf of pdfs) {

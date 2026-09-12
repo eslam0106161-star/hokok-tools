@@ -43,6 +43,16 @@ on:
           - '2'
           - '3'
           - '4'
+      tf_count:
+        description: 'عدد أسئلة الصح والخطأ لكل جزء'
+        required: false
+        default: '5'
+        type: choice
+        options:
+          - '0'
+          - '3'
+          - '5'
+          - '7'
       skip_footnotes:
         description: 'تجاهل الهوامش أسفل الصفحة'
         required: false
@@ -61,6 +71,14 @@ on:
           - 'no'
       verify_content:
         description: 'مراجعة الشرح والأسئلة مقابل النص الأصلي (منع التأليف، دقة الأرقام، صحة إجابات الاختيار) — بيضاعف وقت مرحلة التوليد تقريبًا'
+        required: false
+        default: 'yes'
+        type: choice
+        options:
+          - 'yes'
+          - 'no'
+      verify_structure:
+        description: 'تصنيف ذكي لمستوى العناوين الغامضة (أولاً/ثانياً أو عنوان مكتشف بصريًا) بناءً على سياق الكتاب الكامل — استدعاء واحد رخيص لكل كتاب'
         required: false
         default: 'yes'
         type: choice
@@ -98,9 +116,11 @@ jobs:
           WORD_COUNT: ${{ inputs.word_count }}
           MCQ_COUNT: ${{ inputs.mcq_count }}
           ESSAY_COUNT: ${{ inputs.essay_count }}
+          TF_COUNT: ${{ inputs.tf_count }}
           SKIP_FOOTNOTES: ${{ inputs.skip_footnotes }}
           VERIFY_EXTRACTION: ${{ inputs.verify_extraction }}
           VERIFY_CONTENT: ${{ inputs.verify_content }}
+          VERIFY_STRUCTURE: ${{ inputs.verify_structure }}
         run: node generate-book.js
 
       - name: رفع الملفات الناتجة (Word + النص المستخرج)
