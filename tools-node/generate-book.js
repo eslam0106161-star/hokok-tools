@@ -198,7 +198,7 @@ function sanitizeQAContent(raw, unitLabel) {
     console.warn(`  ⚠️  تعقيم بيانات في "${unitLabel}": ${warnings.join(' | ')}`);
   }
 
-  return { explanation, mcq, essay, tf, hadWarnings: warnings.length > 0 };
+  return { explanation, mcq, essay, tf, isAcademic: raw.is_academic !== false, hadWarnings: warnings.length > 0 };
 }
 
 const wordCountText = { short: 'حوالي 150 كلمة', medium: 'حوالي 300 كلمة', long: 'حوالي 450 كلمة' };
@@ -230,6 +230,13 @@ ${continuityBlock}
 """
 ${unit.text}
 """
+
+خطوة أولى إلزامية — قيّم نوع هذا المحتوى قبل أي حاجة تانية:
+هل ده محتوى أكاديمي حقيقي (تعريف قانوني، حكم، شرط، ركن، إجراء، رأي فقهي...) يستحق شرحًا وأسئلة امتحانية فعلية؟
+ولا هو معلومات تعريفية/إدارية عن الكتاب نفسه مالهاش علاقة بمادة القانون (اسم المؤلف ودرجته العلمية، اسم الجامعة أو الكلية، اسم العميد أو رئيس الجامعة، إهداء، شكر وتقدير، مقدمة عامة بدون مضمون قانوني فعلي، بقايا فهرس، بيانات نشر)؟
+
+- لو المحتوى **أكاديمي**: اجعل "is_academic": true، واكتب الشرح والأسئلة الثلاثة بالكامل زي المطلوب تفصيليًا تحت.
+- لو المحتوى **تعريفي/إداري وليس أكاديميًا**: اجعل "is_academic": false، واكتب في "explanation" جملة أو جملتين بس تصف موضوع الجزء بحياد (من غير "خد بالك" ومن غير تفاصيل)، مثال: "هذا الجزء يحتوي بيانات تعريفية عن المؤلف والجهة العلمية الناشرة للكتاب، وليس محتوى دراسيًا." واترك "mcq" و"essay" و"tf" مصفوفات فارغة [] — **ممنوع تأليف أي سؤال على معلومات إدارية زي اسم عميد أو رئيس جامعة أو تاريخ نشر، مهما كان العدد المطلوب**.
 
 المطلوب أولاً — الشرح:
 اكتب شرحًا أكاديميًا واضحًا بالعربية الفصحى السهلة (${wordCountText[wcOption]})، بدون الإخلال بالدقة القانونية، وبدون إضافة معلومات من خارج النص المعطى. انسخ أي رقم (رقم مادة، تاريخ، نسبة) كما ورد بالنص الأصلي حرفيًا دون تقريب أو تخمين.
@@ -297,6 +304,7 @@ ${unit.text}
 
 أعد النتيجة بصيغة JSON فقط، بدون أي نص أو علامات إضافية قبله أو بعده، وبدون أي إشارة داخل نص الأسئلة نفسها لكونها مأخوذة من "النص" أو "المقطع" (صُغ كل سؤال كسؤال أكاديمي مستقل تمامًا)، بالشكل التالي بالضبط:
 {
+  "is_academic": true,
   "explanation": "الشرح الكامل هنا",
   "mcq": [
     {"question": "نص سؤال بأربعة اختيارات", "choices": ["اختيار 1", "اختيار 2", "اختيار 3", "اختيار 4"], "correct_index": 0},
@@ -308,7 +316,7 @@ ${unit.text}
     {"statement": "عبارة قانونية أخرى محرَّفة عمدًا في نقطة دقيقة", "answer": false}
   ]
 }
-عدد عناصر "choices" في كل سؤال مستقل بذاته (2 أو 3 أو 4 حسب طبيعة السؤال — راجع القواعد أعلاه)، والمثال هنا لتوضيح الشكل العام فقط. يجب أن يحتوي "mcq" على ${mcqCount} عنصر بالضبط، و"essay" على ${essayCount} عنصر بالضبط، و"tf" على ${tfCount} عنصر بالضبط.`;
+عدد عناصر "choices" في كل سؤال مستقل بذاته (2 أو 3 أو 4 حسب طبيعة السؤال — راجع القواعد أعلاه)، والمثال هنا لتوضيح الشكل العام فقط. **لو "is_academic": true**، يجب أن يحتوي "mcq" على ${mcqCount} عنصر بالضبط، و"essay" على ${essayCount} عنصر بالضبط، و"tf" على ${tfCount} عنصر بالضبط. **لو "is_academic": false**، سيب الثلاثة مصفوفات فارغة [] بغض النظر عن العدد المطلوب.`;
 
   const body = { contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.4, responseMimeType: 'application/json' } };
   const data = await geminiFetch(url, body);
@@ -515,6 +523,26 @@ function detectHeadingMatches(rawText) {
       continue;
     }
   }
+
+  // معالجة خاصة: لو عنوان مؤكد بلا عنوان مضمّن (زي "الفصل الأول" لوحده في
+  // سطر) جه بعده مباشرة (السطر التالي غير الفارغ) عنوان "غامض" (اتحط عليه
+  // [HEADING] لأنه هو كمان بخط عريض، زي "المعاهدات الدولية" تحت "الفصل
+  // الأول")، الأرجح إن ده فعليًا العنوان الوصفي للأول مش عنوان مستقل قائم
+  // بذاته — ندمجهم في عنوان واحد بدل ما نعاملهم كعقدتين منفصلتين.
+  for (let i = 0; i < matches.length - 1; i++) {
+    const h = matches[i];
+    const nxt = matches[i + 1];
+    if (h.inlineTitle) continue;
+    if (nxt.kind !== 'ocrMarked' && nxt.kind !== 'wordOrdinal') continue;
+    let j = h.lineIdx + 1;
+    while (j < n && (excluded[j] || !lines[j].trim())) j++;
+    if (j !== nxt.lineIdx) continue;
+    h.inlineTitle = nxt.inlineTitle;
+    h.titleLineIdx = nxt.lineIdx;
+    matches.splice(i + 1, 1);
+    i--;
+  }
+
   matches.forEach((h, i) => {
     if (h.inlineTitle) { h.title = h.inlineTitle; h.titleLineIdx = h.lineIdx; return; }
     let j = h.lineIdx + 1;
@@ -697,8 +725,11 @@ function buildDocumentXmlBody(parsedBook, aiResults, titleName) {
       if (node.children.length === 0) {
         const r = aiResults[node.unitId];
         if (r && !r.fail) {
+          if (r.isAcademic === false) {
+            body += paraXml('ℹ️ معلومات تعريفية عن الكتاب — بدون أسئلة', 'Normal', { italic: true, bold: true });
+          }
           if (r.explanation) body += renderExplanation(r.explanation);
-          if (r.mcq && r.mcq.length) {
+          if (r.isAcademic !== false && r.mcq && r.mcq.length) {
             body += paraXml('أسئلة اختيار من متعدد', 'Normal', { bold: true });
             const letters = ['أ', 'ب', 'ج', 'د'];
             r.mcq.forEach((q, qi) => {
@@ -708,11 +739,11 @@ function buildDocumentXmlBody(parsedBook, aiResults, titleName) {
               body += paraXml(`   ✔ الإجابة الصحيحة: ${correctLetter}`, 'Normal', { bold: true });
             });
           }
-          if (r.essay && r.essay.length) {
+          if (r.isAcademic !== false && r.essay && r.essay.length) {
             body += paraXml('أسئلة مقالية للمراجعة', 'Normal', { bold: true });
             r.essay.forEach((q, qi) => { body += paraXml(`${qi + 1}. ${q}`, 'Normal'); });
           }
-          if (r.tf && r.tf.length) {
+          if (r.isAcademic !== false && r.tf && r.tf.length) {
             body += paraXml('أسئلة صح وخطأ', 'Normal', { bold: true });
             r.tf.forEach((q, qi) => {
               body += paraXml(`${qi + 1}. ${q.statement || ''}`, 'Normal');
@@ -959,7 +990,8 @@ async function processOnePdf(pdfPath) {
           explanation: parsed.explanation || '',
           mcq: Array.isArray(parsed.mcq) ? parsed.mcq : [],
           essay: Array.isArray(parsed.essay) ? parsed.essay : [],
-          tf: Array.isArray(parsed.tf) ? parsed.tf : []
+          tf: Array.isArray(parsed.tf) ? parsed.tf : [],
+          isAcademic: parsed.isAcademic !== false
         };
         done = true;
       } catch (err) {
@@ -970,7 +1002,7 @@ async function processOnePdf(pdfPath) {
           await sleep(Math.min(4000 * rateLimitBackoffs, 30000));
         } else {
           attempts++;
-          if (attempts >= 2) { aiResults[unit.id] = { fail: true, note: err.message, explanation: '', mcq: [], essay: [], tf: [] }; done = true; }
+          if (attempts >= 2) { aiResults[unit.id] = { fail: true, note: err.message, explanation: '', mcq: [], essay: [], tf: [], isAcademic: true }; done = true; }
           else await sleep(1200);
         }
       }
@@ -978,7 +1010,9 @@ async function processOnePdf(pdfPath) {
 
     if (generated) {
       // مرحلة تحقق 2: مراجعة الشرح والأسئلة مقابل النص الأصلي فقط (تأليف/أرقام/إجابات/قابلية الإجابة).
-      if (VERIFY_CONTENT) {
+      // بتتخطى تمامًا لو الجزء "غير أكاديمي" (معلومات تعريفية عن الكتاب) — مفيش
+      // داعي نتحقق من دقة أسئلة مفروض أصلاً إنها فاضية.
+      if (VERIFY_CONTENT && generated.isAcademic) {
         await sleep(pacingMs());
         let vDone = false, vAttempts = 0, vBackoffs = 0;
         while (!vDone) {
