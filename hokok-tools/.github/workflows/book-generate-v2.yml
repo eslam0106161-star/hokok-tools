@@ -1,0 +1,42 @@
+name: Generate Book V2
+on:
+  workflow_dispatch:
+    inputs:
+      book_filename:
+        description: PDF filename or part of name
+        required: false
+        default: ''
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Poppler
+        run: sudo apt-get update && sudo apt-get install -y poppler-utils
+      - name: Install dependencies
+        working-directory: tools-node
+        run: npm install
+      - name: Generate V2
+        working-directory: tools-node
+        env:
+          GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-3.5-flash-lite' }}
+          BOOK_FILENAME: ${{ inputs.book_filename }}
+          CONTENT_MODE: source_strict
+          QUESTION_MODE: adaptive
+          KNOWLEDGE_BATCH_SIZE: 6
+          MAX_MCQ_PER_LESSON: 6
+          MAX_ESSAY_PER_LESSON: 2
+          MAX_TF_PER_LESSON: 4
+          VERIFY_EXTRACTION: yes
+          VERIFY_STRUCTURE: yes
+          V2_EXPORT_DOCX: yes
+        run: node generate-book.js
+      - name: Upload output
+        uses: actions/upload-artifact@v4
+        with:
+          name: hokok-v2-output
+          path: output/

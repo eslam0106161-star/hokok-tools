@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "UECS Lesson",
+  "type": "object",
+  "required": [
+    "lesson_id",
+    "title",
+    "content"
+  ],
+  "properties": {
+    "lesson_id": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "learning_objectives": {
+      "type": "array"
+    },
+    "content": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "type"
+        ]
+      }
+    },
+    "key_points": {
+      "type": "array"
+    },
+    "summary": {
+      "type": "array"
+    },
+    "source_pages": {
+      "type": "array"
+    }
+  }
+}

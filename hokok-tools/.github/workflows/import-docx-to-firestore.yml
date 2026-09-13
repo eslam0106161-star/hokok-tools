@@ -1,0 +1,44 @@
+name: رفع مادة من ملف Word مباشرة لقاعدة البيانات
+
+on:
+  workflow_dispatch:
+    inputs:
+      subject_name:
+        description: 'اسم المادة (سيبها فاضية عشان تستخدم اسم الملف تلقائيًا)'
+        required: false
+        default: ''
+      year_level:
+        description: 'الفرقة الدراسية'
+        required: true
+        default: '1'
+        type: choice
+        options:
+          - '1'
+          - '2'
+          - '3'
+          - '4'
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: تنزيل الريبو
+        uses: actions/checkout@v4
+
+      - name: تثبيت Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: تثبيت مكتبات المشروع
+        working-directory: tools-node
+        run: npm install --no-audit --no-fund
+
+      - name: رفع الملف مباشرة إلى Firestore
+        working-directory: tools-node
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          SUBJECT_NAME: ${{ inputs.subject_name }}
+          YEAR_LEVEL: ${{ inputs.year_level }}
+        run: node import-docx-to-firestore.js

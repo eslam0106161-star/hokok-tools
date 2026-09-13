@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "UECS Question",
+  "type": "object",
+  "required": [
+    "question_id",
+    "type"
+  ],
+  "properties": {
+    "question_id": {
+      "type": "string"
+    },
+    "type": {
+      "enum": [
+        "mcq",
+        "essay",
+        "tf"
+      ]
+    },
+    "difficulty": {
+      "type": "string"
+    },
+    "skill": {
+      "type": "string"
+    },
+    "concept_ids": {
+      "type": "array"
+    },
+    "source_pages": {
+      "type": "array"
+    }
+  }
+}

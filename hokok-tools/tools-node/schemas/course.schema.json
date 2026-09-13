@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "UECS Course",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "book",
+    "knowledge",
+    "lessons",
+    "question_bank"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "UECS-1.0"
+    },
+    "book": {
+      "type": "object"
+    },
+    "knowledge": {
+      "type": "object"
+    },
+    "lessons": {
+      "type": "array"
+    },
+    "question_bank": {
+      "type": "object"
+    },
+    "exams": {
+      "type": "array"
+    },
+    "sources": {
+      "type": "array"
+    },
+    "quality": {
+      "type": "object"
+    }
+  }
+}
